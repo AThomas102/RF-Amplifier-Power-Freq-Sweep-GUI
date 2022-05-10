@@ -2,8 +2,6 @@
 
 # Pysimple Gui Test #
 
-from faulthandler import disable
-from pydoc import visiblename
 import PySimpleGUI as sg
 import math
 import string
@@ -14,6 +12,8 @@ key_list2 = 'freq'
 
 newinstrument = True
 data = [[" "]]
+instrument_data = [[" "]]
+instrument_names = [[" "]]
 """
 def instr_add(value1, value2):
     values[]
@@ -46,7 +46,7 @@ def make_window(theme):
     
     power_sweep_layout = [
                     [sg.Text('Power Sweep Setup')],
-                    [sg.Text('Select DC Supply (Sweep)'), sg.OptionMenu(values=('Option 1', 'Option 2', 'Option 3'),  k='_DCP1_')],
+                    [sg.Text('Select DC Supply (Sweep)'), sg.OptionMenu(values=instrument_data,  k='_DCP1_')],
                     [sg.Input(size=(10,3), key='_DCP1_')],
                     [sg.Text('Select RF Supply 1')],
                     [sg.Text('Select DC Supply 2')],
@@ -55,11 +55,13 @@ def make_window(theme):
 
     freq_sweep_layout = [
                     [sg.Text('Frequency Sweep Setup')],
-                    [sg.Text('Select RF Supply (Sweep)'), sg.OptionMenu(values=('Option 1', 'Option 2', 'Option 3'),  k='_RFF1_')],
-                    [sg.Text('Start Freq/(Hz)'), sg.Input(size=(10,3), key='_RFF1START_'),
-                        sg.Text('Stop Freq/(Hz)'), sg.Input(size=(10,3), key='_RFF1STOP_'),
-                        sg.Text('Stepsize/(Hz)'), sg.Input(size=(10,3), key='_RFF1STEP_')],
+                    [sg.Text('Select RF Supply (Sweep)'), sg.OptionMenu(values=instrument_data,  k='_RFF1_')],
+                    [sg.Text('Start Freq/(Hz):'), sg.Input(size=(10,3), key='_RFF1START_'),
+                        sg.Text('Stop Freq/(Hz):'), sg.Input(size=(10,3), key='_RFF1STOP_'),
+                        sg.Text('Samples:'), sg.Input(size=(10,3), key='_RFF1SAMPLE_'),
+                        sg.Text('Stepsize/(Hz):'), sg.Input(size=(10,3), key='_RFF1STEP_')],
                     [sg.Text('Select DC Supply 1')],
+                    [sg.Text('Set DC Voltage:'), sg.Input(size=(10,3), key='_DCF1VOLT_')],
                     [sg.Text('Select DC Supply 2')],
                     [sg.Text('Select DC Supply 3')],
                     [sg.Button('Ok', key='_OKF_')]]
@@ -122,16 +124,22 @@ def main():
         elif event == 'Versions':
             sg.popup(sg.get_versions(), keep_on_top=True)
         # Functional events
-        elif event == '_ADD_':                                          # Add an instrument
+        elif event == '_ADD_':                                          # Add an instrument to lists
             global newinstrument
             if newinstrument == True:
                 data = [[values['_INPUT1_'], values['_INPUT2_']]]
-                newinstrument = False
+                instrument_names = [[values['_INPUT1_']]]
                 window['_TABLE_'].update(values=data)
+                newinstrument = False
             else:
                 newdata = [values['_INPUT1_'], values['_INPUT2_']]
                 data.append(newdata)
-                window['_TABLE_'].update(values=data)
+                newinstruments = [[values['_INPUT1_']]]
+                instrument_names.append(newinstruments)                
+                window['_TABLE_'].update(values=data)                 
+            window['_DCP1_'].update(values=instrument_names)             # update instrument option menus         
+            window['_RFF1_'].update(values=instrument_names)
+
         elif event == '_CLEAR_':                                         # clear instruments list (to do)
             break
         elif event == '_RFon_':
