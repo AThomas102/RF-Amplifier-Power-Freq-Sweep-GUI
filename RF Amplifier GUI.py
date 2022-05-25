@@ -1,16 +1,17 @@
 
-# attach a channel to the votlage setting function
-# Pysimple Gui Test #
+# Pysimple RF Power and Frequency Sweep Gui #
 
 from contextlib import nullcontext
 from msilib import Table
 from msilib.text import tables
 from multiprocessing.connection import wait
 from sqlite3 import connect
+from tracemalloc import start
 import PySimpleGUI as sg
 from numpy import arange
 import pyvisa as visa
 import os
+import time
 import math
 import string
 import operator
@@ -21,8 +22,8 @@ key_list1 = [('_Pa' + str(c) + '_') for c in range(2)] + [('_Pb' + str(c) + '_')
 
 
 newinstr = True
-instr_data = [["DC Supply 1","GPIB0::2::INSTR"], ["DC Supply 2","GPIB0::3::INSTR"],["DC Supply 3","GPIB0::10::INSTR"],["DC Supply 4","GPIB0::11::INSTR"]]
-instr_names = ["DC Supply 1","DC Supply 2","DC Supply 3","DC Supply 4"]
+instr_data = [["RF Supply","GPIB0::28::INSTR"], ["DC Supply 1","GPIB0::2::INSTR"], ["DC Supply 2","GPIB0::3::INSTR"],["DC Supply 3","GPIB0::10::INSTR"],["DC Supply 4","GPIB0::11::INSTR"]]
+instr_names = ["RF Supply","DC Supply 1","DC Supply 2","DC Supply 3","DC Supply 4"]
 lib_select_keys = ["_PO1_", "_PO2_", "_FO1_"]
 lib_change_keys = ["_PLIB1_", "_PLIB2_", "_FLIB1_"]
 """
@@ -35,7 +36,7 @@ def instr_open():                  # open and list all instrument names on progr
     for i in range(0, len(instr_list)):
         print('--------- Instrument ' + str(i+1) + ' -----------')
         name = instr_list[i]
-        active = [False for x in range(len(instr_list))]
+        active = [False for x in range(len(instr_list))] # shows which instruments are connected
         try:
             resource = rm.open_resource(name)
             instr = resource.query('*IDN?')   
@@ -58,7 +59,7 @@ def instr_open():                  # open and list all instrument names on progr
 
 def option_menu_update(window, values, libsl, libck, instr_names, instr_data):  # updates the current device from the one selected in the option menu
     for i in range(len(libsl)):
-        print('i=' + str(i))
+        print('i=', str(i))
         k = values[libsl[i]]                                        # gives current frequency tab option value
         print('=> option menu ' + libsl[i] + ' = ' + k) 
         try:                                                
@@ -83,11 +84,13 @@ def option_menu_update(window, values, libsl, libck, instr_names, instr_data):  
             print('UPDATE key = ' + libsl[i] + ' failed')
 
 
+
 def lib_select(GPIB_address):               # auto selects the library to use
     try:
         resource =  rm.open_resource(GPIB_address)
-        instr = resource.query('*IDN?')  
+        instr = resource.query('*IDN?') 
         instr = instr.strip()
+        print(instr) 
         print('-library available for this GPIB address-')  
     except Exception as e:
         print(type(e))
@@ -105,58 +108,77 @@ def lib_select(GPIB_address):               # auto selects the library to use
 
 def rf_input_check(values):
     try:
-        freq = float(values['_PRF_0_0_'])
+        freq = 10*float(values['_PRF_0_0_'])
         start = float(values['_PRF_0_1_'])
         stop = float(values['_PRF_0_2_'])
-        step = float(values['_PRF_0_3_'])
-        if freq not in arange(0.1, 30, 0.1):                           # might need to update this depending on the device
+        step = 10*float(values['_PRF_0_3_'])
+        if freq not in arange(start=0.1*10, stop= 31*10,step=0.1*10):                           # use arange if you want, I hate it..
             print('Invalid freq, please use any value from 0.1-30 GHz in steps of 0.1')
-        elif start not in arange(-80, 30, 1):                     # can change this range if needed
+            return 0
+        if start not in range(-80, 30, 1):                     
             print('Invalid start RF power, please use any value from -80 - 30 dBm')
             return 0
-        elif stop not in arange(-80, 30, 1):
+        if stop not in range(-80, 30, 1):
             print('Invalid stop RF power, please use any value from -80 - 30 dBm')
             return 0 
-        elif stop < start:
+        if stop < start:
             print('RF stop must be greater than RF start, please change')
             return 0
-        elif step not in arange(0.1, 2, 0.1):
+        if step not in arange(0.1*10, 2.1*10, 0.1*10):
             print('invalid Step value, please use any value from 0.1-2.0 dB in steps of 0.1')
             return 0
         print('RF parameters OK')
         return 1
+        print('ok')
     except Exception as e:
         print(type(e))
         print('-unable to recognise RF parameters please check-')
 
 
-
-
+def find_address(values, option_menu_key):                   # finds the respective GPIB address for the current menu selection
+    k = values[option_menu_key]                     # get current option menu value
+    index = instr_names.index(k)
+    sel_address = instr_data[index][1]
+    return sel_address
 
 def update_RF_supply(values, sweep_type):           # sweep type used to show which tab is currently in use 
     freq = float(values['_PRF_0_0_'])               
     try:
-        if sweep_type == 'power':
-            k = values['_PO1_']                     # get current option menu value
-            index = instr_names.index(k)
-            sel_address = instr_data[index][1]
-            rf_supply =  rm.open_resource(sel_address) # open rf supply instrument
-            rf_supply.write('', freq)
-            rf_supply.write('', freq)
+        if sweep_type == 'power_tab':               # check whether update of power or frequency tab is needed
+            sel_address = find_address(values, option_menu_key='_PO1_')
+            print('here') #working here
+            rf_supply = rm.open_resource(sel_address)              # open rf supply instrument
+            rf_supply.write('SOURce1:FREQuency:CW ' + str(freq) + ' GHz')               
     except Exception as e:
         print(type(e))
-        print('-unable to recognise RF parameters please check-')
-        
-    wait(1)
-'''
-def start_POWER_sweep():            # starts power sweep when start button is pressed
-    check whether inputs are valid, e.g start and stop within range
-    break if not, or if ok then advance and assign start as green or add green dot
-    wait(1)
-    step up 0.1 dbm from start to finish
-    wait(0.1)
-    read and wait for outputs
-'''
+        print('-unable to update RF parameters please check device-')
+    
+
+def start_POWER_sweep(values):            # starts power sweep when start button is pressed
+    complete = False
+    freq = float(values['_PRF_0_0_'])
+    start = float(values['_PRF_0_1_'])
+    stop = float(values['_PRF_0_2_'])
+    step = float(values['_PRF_0_3_'])
+    sel_address = find_address(values, option_menu_key='_PO1_')
+    rf_supply =  rm.open_resource(sel_address)
+    rf_supply.write('*RST')
+    rf_supply.write('*CLS')
+    rf_supply.write('SOURce1:FREQuency:CW ' + str(freq) + ' GHz')
+    rf_supply.write('SOURce1:SWEep:POWer:MODE MANual')
+    rf_supply.write('SOURce1:POWer:STARt ' + str(start) + ' dBm')
+    rf_supply.write('SOURce1:POWer:STOP ' + str(stop) + ' dBm')
+    rf_supply.write('SOURce1:POWer:MODE SWEep')
+    rf_supply.write('Output1:STATe 1')
+    rf_supply.write('SOURce1:SWEep:POWer:STEP ' + str(step))
+    while complete == False:
+        rf_supply.write('SOURce1:POWer:MANual UP')
+        time.sleep(0.5)
+        current_power = float(rf_supply.query('SOURce1:POWer:POWer?'))  
+        print('current power =' + str(current_power)) 
+        if current_power >= stop: 
+            complete = True
+    print('-RF Power Sweep Complete-')
 
 def update_voltage(dc_supply, voltage_setting, channel):  # sends voltage setting
     try:
@@ -198,11 +220,12 @@ def make_window(theme):
     headings = ['Freq', 'Voltage', 'Current']
     headings1 = ['Instrument Name', 'VISA Address']
     rfsupply_columns = ['Freq (GHz):', 'Start (dBm):', 'Stop (dBm):', 'step (dB):']
+    default_rf_inputs = ['1.5', '-30', '-10', '0.1']
     dcsupply_columns = ['Voltage (V):', 'Current Lim (A):', 'Other Setting:']
     right_click_menu_def = [[], ['Info', 'Versions', '1', 'Nothing']]
     # layout for input columns
     rf_column1 = [[sg.Text(rfsupply_columns[j], size=(12, 1), pad=(8,1), justification='l') for j in range(4)] for i in range(1)]
-    rf_column2 = [[sg.InputText(size=(14, 2), pad=(6,1), justification='l', k=('_PRF_' + str(i) + '_' + str(j) + '_')) for j in range(4)] for i in range(1)]
+    rf_column2 = [[sg.InputText(default_rf_inputs[j],size=(14, 2), pad=(6,1), justification='l', k=('_PRF_' + str(i) + '_' + str(j) + '_')) for j in range(4)] for i in range(1)]
     power_column1 = [[sg.Text('Channel:', size=(10,1))] + [sg.Text(dcsupply_columns[j], size=(12, 1), pad=(8,1),justification='l') for j in range(3)] for i in range(1)]
     power_column2 = [[sg.Text(str(i+1), size=(10,1), justification='c')] + [sg.InputText(size=(14, 1), pad=(6,1), justification='l', k=('_PDC1_' + str(i) + '_' + str(j) + '_')) for j in range(3)] for i in range(2)]
 
@@ -235,7 +258,8 @@ def make_window(theme):
                     # [sg.Input(justification='l', pad=((20,0),(0,0)), size=(20,2), key=('_Pb' + str(c) + '_')) for c in range(3)],
                     [sg.Text('Select DC Supply 2', font ='bold')],
                     [sg.Text('Select DC Supply 3', font ='bold')],
-                    [sg.Button('Ok', key='_OKP_'), sg.Button('Update', key='_UPDATEP_')]]
+                    [sg.Button('Ok', key='_OKP_'), sg.Button('Update', key='_UPDATEP_'), sg.Button('START', key='_STARTP_')]] # TO DO color start button green or red depending on whether all inputs are valid
+
 
     freq_sweep_layout = [
                     [sg.Text('Frequency Sweep Setup')],
@@ -321,7 +345,8 @@ def main():
         elif event == 'Versions':
             sg.popup(sg.get_versions(), keep_on_top=True)
         # Functional events
-        elif event == '_ADD_':                                          # Add an instrument to all lists
+        elif event == '_ADD_': 
+            print('-------- ADD Instrument --------')                                         # Add an instrument to all lists
             newinstr = False                                            # comment out
             if newinstr == True:
                 instr_data = [[values['_INPUT1_'], values['_INPUT2_']]]       # somehow works by adding the name and the GPIB address into a table
@@ -359,9 +384,10 @@ def main():
         if event == '_UPDATEP0_' or event == '_UPDATEP_':                                        # sends values to instrument RF Supply        
             print('-------- Update (P0) --------')
             if rf_input_check(values) == True:
-                update_RF_supply(values, 'power')
+                update_RF_supply(values, 'power_tab')
             else:
                 print('rf input is invalid')
+
          
 
         if event == '_UPDATEP1_' or event == '_UPDATEP_':                                        # sends values to instrument DC supply 1
@@ -370,7 +396,6 @@ def main():
             voltage_setting_2 = values['_PDC1_1_0_']                                               # just generally tidied up
             current_setting_1 = values['_PDC1_0_1_']
             current_setting_2 = values['_PDC1_1_1_']
-            print('Power supply 1 channel 1 Voltage: ' + str(voltage_setting_1))
             k = values['_PO2_']
             try:                                               
                 index = instr_names.index(k)
@@ -383,7 +408,14 @@ def main():
                 update_current(DC1, current_setting_2, channel=2)      
             except:
                 print('-unable to recognise DC1 parameters please check-')
-        
+        if event == '_STARTP_':
+            print('-------- START Power Sweep --------')
+            if rf_input_check(values) == True:
+                start_POWER_sweep(values)
+            else:
+                print('-cannot start sweep rf input is invalid-')
+
+
 
     window.close()
     exit(0)
