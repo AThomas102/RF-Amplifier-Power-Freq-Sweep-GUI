@@ -1,6 +1,7 @@
 
-# Pysimple RF Power and Frequency Sweep Gui #
+# Pysimple Gui Test #
 
+from calendar import c
 from contextlib import nullcontext
 from msilib import Table
 from msilib.text import tables
@@ -8,13 +9,10 @@ from multiprocessing.connection import wait
 from sqlite3 import connect
 from tracemalloc import start
 import PySimpleGUI as sg
-from numpy import arange
+import numpy as np
 import pyvisa as visa
 import os
 import time
-import math
-import string
-import operator
 
 
 key_list1 = [('_Pa' + str(c) + '_') for c in range(2)] + [('_Pb' + str(c) + '_') for c in range(3)]                                     # NEEDS CONTINUOUS UPDATING 
@@ -31,8 +29,16 @@ def instr_add(value1, value2):
     values[]
     data.append()
 """
+class dc_output_channel:
+    def __init__(dc_supply, current_list, voltage_list):
+        dc_supply.current_list = current_list
+        dc_supply.voltage_list = voltage_list
 
-def instr_open():                  # open and list all instrument names on program start and check whether they are active
+class rf_output:    # not used yet, for rf power sensor devices
+    def __init__(power_sensor, rf_out):
+        power_sensor.rf_out = rf_out
+
+def instr_open():           # open and list all instrument names on program start and check whether they are active
     for i in range(0, len(instr_list)):
         print('--------- Instrument ' + str(i+1) + ' -----------')
         name = instr_list[i]
@@ -44,10 +50,11 @@ def instr_open():                  # open and list all instrument names on progr
             print(instr)
             try:
                 address = resource.query('ADDRESS?')
+                # address = resource.query(':SYSTem:COMMunicate:GPIB[:SELF]:ADDRess <Address>')     # address query for SWM200A signal generator
                 address = address.strip()
                 print('address: ' + address)
             except Exception as e:
-                print('address command not recognised')
+                print('address command not recognised')   
             active[i] = True
             print('connected: ' + str(active[i]))
 
@@ -98,6 +105,7 @@ def lib_select(GPIB_address):               # auto selects the library to use
         instr = 'none' 
     if 'CPX400DP' in instr:                 # add libraries here
         lib_name = 'CPX400DP DC Power Supply'
+        # channel_number = 2
     elif 'SMW200A' in instr:
         lib_name = 'SMW200A RF Supply'
     elif 'MX100TP' in instr:
@@ -108,32 +116,47 @@ def lib_select(GPIB_address):               # auto selects the library to use
 
 def rf_input_check(values):
     try:
-        freq = 10*float(values['_PRF_0_0_'])
+        freq = float(values['_PRF_0_0_'])
         start = float(values['_PRF_0_1_'])
         stop = float(values['_PRF_0_2_'])
-        step = 10*float(values['_PRF_0_3_'])
-        if freq not in arange(start=0.1*10, stop= 31*10,step=0.1*10):                           # use arange if you want, I hate it..
-            print('Invalid freq, please use any value from 0.1-30 GHz in steps of 0.1')
+        step = float(values['_PRF_0_3_'])
+        if  0.1 <= freq <= 30 and (100*freq)%1 == 0:                           
+            print('OK Frequency')
+        else:
+            print('Invalid freq, please use any value from 0.1-30 GHz in steps of 0.01')
             return 0
-        if start not in range(-80, 30, 1):                     
+        if -80 <= start <= 30 and (10*start)%1 == 0:                     
+            print('OK start')
+        else:
             print('Invalid start RF power, please use any value from -80 - 30 dBm')
             return 0
-        if stop not in range(-80, 30, 1):
+        if -80 <= stop <= 30 and (10*stop)%1 == 0:
+            print('OK stop')
+        else:
             print('Invalid stop RF power, please use any value from -80 - 30 dBm')
-            return 0 
-        if stop < start:
-            print('RF stop must be greater than RF start, please change')
             return 0
-        if step not in arange(0.1*10, 2.1*10, 0.1*10):
-            print('invalid Step value, please use any value from 0.1-2.0 dB in steps of 0.1')
+        if start < step:
+            print('OK start and stop')
+        else:
+            print('RF stop must be greater than RF start')
+            return 0
+        if 0.01 <= step <= 10 and (100*step)%1 == 0:
+            print('OK step')
+        else:
+            print('invalid Step value, please use any value from 0.01-10.0 dB in steps of 0.01')
             return 0
         print('RF parameters OK')
         return 1
-        print('ok')
     except Exception as e:
         print(type(e))
         print('-unable to recognise RF parameters please check-')
 
+def dc_input_check(values, tab_type):       # checks all dc current limit and voltage values are in valid range
+    try:
+        current1 = float(values['_PRF_0_0_'])
+    except Exception as e:
+        print(type(e))
+    return True
 
 def find_address(values, option_menu_key):                   # finds the respective GPIB address for the current menu selection
     k = values[option_menu_key]                     # get current option menu value
@@ -146,22 +169,64 @@ def update_RF_supply(values, sweep_type):           # sweep type used to show wh
     try:
         if sweep_type == 'power_tab':               # check whether update of power or frequency tab is needed
             sel_address = find_address(values, option_menu_key='_PO1_')
-            print('here') #working here
             rf_supply = rm.open_resource(sel_address)              # open rf supply instrument
             rf_supply.write('SOURce1:FREQuency:CW ' + str(freq) + ' GHz')               
     except Exception as e:
         print(type(e))
         print('-unable to update RF parameters please check device-')
-    
+
+def get_DC_current(dc_supply, channel): # simply gets the current value for a given device and channel 
+    try:
+        current = dc_supply.query('I' + str(channel) + 'O?')    # this command is for the CPX400DP power supply
+        return current
+    except Exception as e:
+        print(type(e))
+        return 'fail'
+
+def get_DC_voltage(dc_supply, channel): # simply gets the voltage value for a given device and channel 
+    try:
+        voltage = dc_supply.query('V' + str(channel) + 'O?')    # this command is for the CPX400DP power supply
+        return voltage
+    except Exception as e:
+        print(type(e))
+        return 'fail'
+
+def append_output_value(current_value, current_list): # appends output value on to list
+    try:
+        current_list.append(current_value)     
+        return current_list
+    except Exception as e:
+        current_list.append('-')
+        print(type(e))
+        
+def toggle_channels(dc_supply, toggle): # turns on 4 channels
+    dc_supply.write('OP1 ' + str(toggle))           
+    dc_supply.write('OP2 ' + str(toggle))
+    #dc_supply.write('OP3 ' + str(toggle))
+    #dc_supply.write('OP4 ' + str(toggle))
 
 def start_POWER_sweep(values):            # starts power sweep when start button is pressed
     complete = False
+    channel1 = dc_output_channel(current_list=[], voltage_list=[])  # class of outputs for channel 1 current and voltage 
     freq = float(values['_PRF_0_0_'])
     start = float(values['_PRF_0_1_'])
     stop = float(values['_PRF_0_2_'])
     step = float(values['_PRF_0_3_'])
-    sel_address = find_address(values, option_menu_key='_PO1_')
-    rf_supply =  rm.open_resource(sel_address)
+    
+    sel_address_rf = find_address(values, option_menu_key='_PO1_')
+    try:                # connects to the rf supply if it is not already connected
+        rf_supply = rm.open_resource(sel_address_rf)
+    except Exception as e:
+        print(type(e))
+        print('Connection to RF supply failed, sweep failed')
+        return 1        # exits function if rf supply is not connected
+    sel_address_dc1 = find_address(values, option_menu_key='_PO2_')
+    try:                # connects to the dc supply if it is not already connected
+        dc_supply = rm.open_resource(sel_address_dc1)
+    except Exception as e:
+        print(type(e))
+        print('Connection to DC supply 1 failed')
+    toggle_channels(dc_supply, 1) # turns on 4 channels
     rf_supply.write('*RST')
     rf_supply.write('*CLS')
     rf_supply.write('SOURce1:FREQuency:CW ' + str(freq) + ' GHz')
@@ -172,13 +237,26 @@ def start_POWER_sweep(values):            # starts power sweep when start button
     rf_supply.write('Output1:STATe 1')
     rf_supply.write('SOURce1:SWEep:POWer:STEP ' + str(step))
     while complete == False:
+        # I need to check for some kind of interupt here during the sweep
         rf_supply.write('SOURce1:POWer:MANual UP')
-        time.sleep(0.5)
-        current_power = float(rf_supply.query('SOURce1:POWer:POWer?'))  
-        print('current power =' + str(current_power)) 
-        if current_power >= stop: 
+        time.sleep(0.2)
+        current_value = get_DC_current(dc_supply, 1)
+        if current_value == 'fail':
+            print('get current value failed on ', str(sel_address_dc1), ' channel 1')
+        voltage_value = get_DC_voltage(dc_supply, 1)
+        if voltage_value == 'fail':
+            print('get voltage value failed on ', str(sel_address_dc1), ' channel 1')
+        channel1.current_list = append_output_value(current_value, channel1.current_list)
+        channel1.voltage_list = append_output_value(voltage_value, channel1.voltage_list)
+        current_power = float(rf_supply.query('SOURce1:POWer:POWer?'))   
+        print('current power = ' + str(current_power), ', V = ', str(voltage_value),', I = ', str(current_value)) # not needed, comment out if sweep is too slow
+        if current_power >= stop:       # check whether sweep is complete
             complete = True
+    toggle_channels(dc_supply, 0) # turns off 4 channels
     print('-RF Power Sweep Complete-')
+    print(channel1.voltage_list)
+    print(channel1.current_list)
+    return channel1
 
 def update_voltage(dc_supply, voltage_setting, channel):  # sends voltage setting
     try:
@@ -192,7 +270,7 @@ def update_voltage(dc_supply, voltage_setting, channel):  # sends voltage settin
 def update_current(dc_supply, current_setting, channel):  # sends current setting
     try:
         float(current_setting)
-        dc_supply.write('V' + str(channel) + ' ' + str(current_setting))
+        dc_supply.write('I' + str(channel) + ' ' + str(current_setting))
         print('Current SET')
     except Exception as e: 
         print(type(e))
@@ -201,9 +279,6 @@ def update_current(dc_supply, current_setting, channel):  # sends current settin
 def update_tab(window, parameter):
     window['_power_'].update(visible=parameter)
     window['_freq_'].update(visible=not(parameter))
-
-
-    
 
 
 def CPX400DP_library():                 # library to determine which options/inputs should be disabled in the layout
@@ -220,7 +295,7 @@ def make_window(theme):
     headings = ['Freq', 'Voltage', 'Current']
     headings1 = ['Instrument Name', 'VISA Address']
     rfsupply_columns = ['Freq (GHz):', 'Start (dBm):', 'Stop (dBm):', 'step (dB):']
-    default_rf_inputs = ['1.5', '-30', '-10', '0.1']
+    default_rf_inputs = ['0.5', '-20', '-10', '1']
     dcsupply_columns = ['Voltage (V):', 'Current Lim (A):', 'Other Setting:']
     right_click_menu_def = [[], ['Info', 'Versions', '1', 'Nothing']]
     # layout for input columns
@@ -388,7 +463,6 @@ def main():
             else:
                 print('rf input is invalid')
 
-         
 
         if event == '_UPDATEP1_' or event == '_UPDATEP_':                                        # sends values to instrument DC supply 1
             print('-------- Update (P1) --------')                                                 # updateP1 button needs to be added, if just one instrument
@@ -396,18 +470,24 @@ def main():
             voltage_setting_2 = values['_PDC1_1_0_']                                               # just generally tidied up
             current_setting_1 = values['_PDC1_0_1_']
             current_setting_2 = values['_PDC1_1_1_']
-            k = values['_PO2_']
-            try:                                               
-                index = instr_names.index(k)
-                print(index)
-                sel_address = instr_data[index][1]                                              # finds address for selected instrument
-                DC1 = rm.open_resource(sel_address)
-                update_voltage(DC1, voltage_setting_1, channel=1)                                           # updates DC supply voltages and currents on this device
-                update_voltage(DC1, voltage_setting_2, channel=2)                                           
-                update_current(DC1, current_setting_1, channel=1)
-                update_current(DC1, current_setting_2, channel=2)      
-            except:
-                print('-unable to recognise DC1 parameters please check-')
+            print(voltage_setting_1)
+            print(voltage_setting_2)
+            print(current_setting_1)
+            print(current_setting_2)
+            if dc_input_check(values, 'power') == True:
+                try:
+                    k = values['_PO2_']                                               
+                    index = instr_names.index(k)
+                    sel_address = instr_data[index][1]                                              # finds address for selected instrument
+                    DC1 = rm.open_resource(sel_address)
+                    update_voltage(DC1, voltage_setting_1, channel=1)                                           # updates DC supply voltages and currents on this device
+                    update_voltage(DC1, voltage_setting_2, channel=2)                                           
+                    update_current(DC1, current_setting_1, channel=1)
+                    update_current(DC1, current_setting_2, channel=2)      
+                except:
+                    print('-unable to recognise DC1 parameters please check-')
+            else:
+                print('dc input is invalid')
         if event == '_STARTP_':
             print('-------- START Power Sweep --------')
             if rf_input_check(values) == True:
