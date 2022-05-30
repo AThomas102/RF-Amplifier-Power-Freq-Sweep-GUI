@@ -1,0 +1,187 @@
+from contextlib import nullcontext
+from msilib import Table
+from msilib.text import tables
+from multiprocessing.connection import wait
+from sqlite3 import connect
+from tracemalloc import start
+import PySimpleGUI as sg
+from numpy import arange
+import pyvisa as visa
+import os
+import time
+import math
+import string
+import operator
+
+'''
+# used imports:
+
+import pyvisa as visa
+import os
+'''
+
+
+class BuildGui:
+
+    def __init__(self, window):
+        self.window = window
+
+    # change separator colour
+    def sep_colour(self, sepname, sepcolour):
+        style_name = sepname + "Line.TSeparator"
+        button_style = sg.ttk.Style()
+        button_style.theme_use(self.window.TtkTheme)
+        button_style.configure(style_name, background = sepcolour)
+        self.window[sepname].Widget.configure(style = style_name)
+
+    def update_tab(self, booli):
+        window['_PWR.TAB_'].update(visible=booli)
+        window['_FRQ.TAB_'].update(visible=not(booli))
+
+
+
+
+class InstrConnect:
+
+    def __init__(self, rm):
+        self.instrlist = rm.list_resources()
+
+    def instr_check(self):
+        connected = []
+        print(self.instrlist)
+        for addr in self.instrlist:
+            try:
+                rsrc = rm.open_resource(addr)
+                rsrc.write('*IDN?')
+                idn = rsrc.read()
+                if idn:
+                    connected.append([idn, addr, ''])
+            except:
+                pass              
+        return connected
+
+       
+
+if __name__ == '__main__':
+
+    frqsuff = ['Hz', 'kHz', 'MHz', 'GHz']
+
+    # standard theme colour
+    sg.theme('DarkBlue4')
+
+    setup_col_1 = [[sg.Button('Search Instruments', key='_INSTR.SEARCH_',
+                              font='bold 11', button_color='Gray58')],
+                   [sg.Table(size=(80,1), values=[['','','']],
+                             headings=['Instrument ID', 'VISA Address',
+                                       'Instrument Function'],
+                             max_col_width=25, text_color='black',
+                             background_color='White', auto_size_columns=True,
+                             display_row_numbers=False, justification='right',
+                             num_rows=3, key='_INSTR.TABLE_', row_height=25,
+                             enable_events=True,
+                             select_mode=sg.TABLE_SELECT_MODE_BROWSE)]]
+
+    setup_layout = [
+        [sg.Col(setup_col_1)], [sg.HorizontalSeparator(key='_SEP.1_')],
+        [sg.Text('Select instrument from table and assign functionality:',
+                 font='bold 12'), sg.Push()],
+        [sg.Text('Instrument ID:', size=(18,1), font='bold 11'),
+         sg.Input(size=(28,1), disabled=True, key='_SLCT.INSTR_'),
+         sg.Push()],
+        [sg.Text('Instrument functionality:', size=(18,1), font='bold 11'),
+         sg.OptionMenu(values=['DC Power Supply', 'Vector Signal Generator'],
+                       key='_INSTR.FUNC_'),
+         sg.Push()],
+        [sg.Col([[sg.Button('Update Instrument', key='_UPDATE.INSTR_',
+                   font='bold 11', button_color='Gray58')]]),
+         sg.Push()],
+        [sg.HorizontalSeparator(key='_SEP.2_')],
+        [sg.Text('Select sweep mode:', font='bold 12'), sg.Push()],
+        [sg.Col([[sg.Radio('Power Sweep', 'Sweep', default=True,
+                           enable_events=True, key='_PWR.SWEEP_',
+                           font='bold 11')],
+        [sg.Radio('Frequency Sweep', 'Sweep', default=False,
+                  enable_events=True, key='_FRQ.SWEEP_', font='bold 11')]]),
+         sg.Push()]
+        ]
+
+    frq_layout = [
+        [sg.Text('Select frequency sweep parameters for vector signal '
+                 'generator:', font='bold 12')],
+        [sg.Text('Start Freq:', size=(18,1)),
+         sg.Text('Stop Freq:', size=(18,1))],
+        [sg.Input(justification='l', size=(13,2), key=('_F1_')),
+         sg.OptionMenu(values=frqsuff),
+         sg.Input(justification='l', size=(13,2), key=('_F2_')),
+         sg.OptionMenu(values=frqsuff)],
+        [sg.Radio('Sample Number:', 'SweepType', size=(18,1)),
+         sg.Radio('Stepsize (GHz):', 'SweepType', size=(18,1))]
+        ]
+
+    pwr_layout = []
+    
+    
+    layout = [[sg.TabGroup([[
+        sg.Tab('Instrument Setup', setup_layout, element_justification= 'c'),
+        sg.Tab('Power Sweep', pwr_layout, visible=True, key='_PWR.TAB_'),
+        sg.Tab('Frequency Sweep', frq_layout, visible=False, key='_FRQ.TAB_')]],
+                           tab_location='centertop', title_color='White',
+                           tab_background_color='Gray',
+                           selected_title_color='White',
+                           selected_background_color='Purple',
+                           border_width=5)]]
+
+    window = sg.Window('RF Amplifier Frequency/Power Sweep',
+                       layout, grab_anywhere=True, resizable=True,
+                       margins=(0,0), finalize=True,
+                       scaling=1.5, element_padding=(4, 2))
+    
+    window.set_min_size(window.size)
+
+    BG = BuildGui(window)
+    BG.sep_colour('_SEP.1_','SlateBlue3')
+    BG.sep_colour('_SEP.2_','SlateBlue3')
+
+    while True:
+        event, values = window.read()
+        
+        if event == "Exit" or event == sg.WIN_CLOSED:
+            break
+
+
+        elif event == '_INSTR.SEARCH_':
+            os.add_dll_directory('C:\\Program Files\\Keysight\\IO Libraries '
+                                 'Suite\\bin')
+            rm = visa.ResourceManager('ktvisa32')
+            IC = InstrConnect(rm)
+            connected = IC.instr_check()
+            window['_INSTR.TABLE_'].update(values=connected)
+            if connected[0][0] == '':
+                sg.popup_error(f'No connected instruments detected. Ensure '
+                               'instrument connected and search again.')
+
+        elif event == '_INSTR.TABLE_':
+            try:
+                rowselected = [connected[row] for row in values[event]]
+                instrselected = rowselected[0]
+                window['_SLCT.INSTR_'].update(instrselected)
+            except:
+                sg.popup_error(f'Select correct connection when '
+                               'displayed in the table.')
+
+        elif event == '_UPDATE.INSTR_':
+            if values['_SLCT.INSTR_'] != '' and values['_INSTR.FUNC_'] != '':
+                connected[rowselected][2] = values['_INSTR.FUNC_']
+                window['_INSTR.TABLE_'].update(values=connected)
+            else:
+                sg.popup_error(f'Make sure instrument and functionality '
+                                'both selected in order to update table.')
+
+        elif event == '_PWR.SWEEP_':
+            BG.update_tab(booli=True)
+            
+        elif event == '_FRQ.SWEEP_':
+            BG.update_tab(booli=False)
+            
+
+    window.close()
