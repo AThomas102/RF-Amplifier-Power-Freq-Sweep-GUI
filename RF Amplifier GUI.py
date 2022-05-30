@@ -10,6 +10,7 @@ from sqlite3 import connect
 from tracemalloc import start
 import PySimpleGUI as sg
 import numpy as np
+import pandas as pd
 import pyvisa as visa
 import os
 import time
@@ -37,8 +38,12 @@ class dc_output_channel:
 class rf_output:    # not used yet, for rf power sensor devices
     def __init__(power_sensor, rf_out):
         power_sensor.rf_out = rf_out
-
-def instr_open():           # open and list all instrument names on program start and check whether they are active
+'''
+class combined_output_values:
+    def __init__():
+        None
+'''
+def instr_open(rm):           # open and list all instrument names on program start and check whether they are active, slow function so might need to be changed
     for i in range(0, len(instr_list)):
         print('--------- Instrument ' + str(i+1) + ' -----------')
         name = instr_list[i]
@@ -114,7 +119,7 @@ def lib_select(GPIB_address):               # auto selects the library to use
         lib_name = 'none'                           # if returns 'none' then there is no library available yet for this device
     return lib_name
 
-def rf_input_check(values):
+def RF_input_check(values):
     try:
         freq = float(values['_PRF_0_0_'])
         start = float(values['_PRF_0_1_'])
@@ -151,12 +156,47 @@ def rf_input_check(values):
         print(type(e))
         print('-unable to recognise RF parameters please check-')
 
-def dc_input_check(values, tab_type):       # checks all dc current limit and voltage values are in valid range
-    try:
-        current1 = float(values['_PRF_0_0_'])
-    except Exception as e:
-        print(type(e))
-    return True
+def get_DC_inputs(values, num_channels):
+    dc_values = [['' for i in range(num_channels)] for j in range(2)]
+    dc_values[0][0] = values['_PDC1_0_0_']                  # get channel 1 voltage                                            
+    dc_values[0][1] = values['_PDC1_0_1_']                  # get channel 1 current
+    if num_channels > 1:        # for 2 channel supplies
+        dc_values[1][0] = values['_PDC1_1_0_']                                               
+        dc_values[1][1] = values['_PDC1_1_1_']
+    if num_channels > 2:        # for 3 channel supplies
+        dc_values[2][0] = values['_PDC1_2_0_']                                               
+        dc_values[2][1] = values['_PDC1_2_1_']
+    if num_channels > 3:        # for 4 channel supplies
+        dc_values[3][0] = values['_PDC1_3_0_']                                               
+        dc_values[3][1] = values['_PDC1_3_1_']
+    return dc_values
+
+            
+def DC_input_check(dc_values, num_channels):       # checks all dc current limit and voltage values are in valid range
+    # instead of using num_channels input variable, the number of channels can be checked inside the function with dc_values[size of this][]
+    i = 0
+    while i < num_channels:
+        try:
+            voltage = float(dc_values[i][0])
+            current = float(dc_values[i][1])
+            if  0 <= voltage <= 30 and (100*voltage)%1 == 0:                           
+                print('OK Voltage on channel: ', str(i+1))
+            else:
+                print('-Invalid voltage on channel:', str(i+1), ', please use any value from 0-30 V in steps of 0.01-')
+                return 0
+            if  0 <= current <= 5 and (100*current)%1 == 0:                           
+                print('OK Current on channel:', str(i+1))
+            else:
+                print('-Invalid current on channel:', str(i+1), ', please use any value from 0-5 A in steps of 0.01-')
+                return 0
+        except Exception as e:
+            print(type(e))
+            print('-please input a value-')
+            return 0
+        finally:
+            i=i+1
+    print('DC parameters OK')
+    return 1
 
 def find_address(values, option_menu_key):                   # finds the respective GPIB address for the current menu selection
     k = values[option_menu_key]                     # get current option menu value
@@ -199,11 +239,14 @@ def append_output_value(current_value, current_list): # appends output value on 
         current_list.append('-')
         print(type(e))
         
-def toggle_channels(dc_supply, toggle): # turns on 4 channels
-    dc_supply.write('OP1 ' + str(toggle))           
-    dc_supply.write('OP2 ' + str(toggle))
-    #dc_supply.write('OP3 ' + str(toggle))
-    #dc_supply.write('OP4 ' + str(toggle))
+def toggle_channels(dc_supply, on): # turns on 4 channels
+    dc_supply.write('OP1 ' + str(on))           
+    dc_supply.write('OP2 ' + str(on))
+    #dc_supply.write('OP3 ' + str(on))
+    #dc_supply.write('OP4 ' + str(on))
+
+def export_to_csv():
+    value = 0
 
 def start_POWER_sweep(values):            # starts power sweep when start button is pressed
     complete = False
@@ -226,7 +269,7 @@ def start_POWER_sweep(values):            # starts power sweep when start button
     except Exception as e:
         print(type(e))
         print('Connection to DC supply 1 failed')
-    toggle_channels(dc_supply, 1) # turns on 4 channels
+    toggle_channels(dc_supply, on=1) # turns on 4 channels
     rf_supply.write('*RST')
     rf_supply.write('*CLS')
     rf_supply.write('SOURce1:FREQuency:CW ' + str(freq) + ' GHz')
@@ -252,29 +295,29 @@ def start_POWER_sweep(values):            # starts power sweep when start button
         print('current power = ' + str(current_power), ', V = ', str(voltage_value),', I = ', str(current_value)) # not needed, comment out if sweep is too slow
         if current_power >= stop:       # check whether sweep is complete
             complete = True
-    toggle_channels(dc_supply, 0) # turns off 4 channels
+    toggle_channels(dc_supply, on=0) # turns off 4 channels
     print('-RF Power Sweep Complete-')
     print(channel1.voltage_list)
     print(channel1.current_list)
     return channel1
 
-def update_voltage(dc_supply, voltage_setting, channel):  # sends voltage setting
-    try:
-        float(voltage_setting)
-        dc_supply.write('V' + str(channel) + ' ' + str(voltage_setting))
-        print('Voltage SET')
-    except Exception as e: 
-        print(type(e))
-        print('voltage setting not a value')
-
-def update_current(dc_supply, current_setting, channel):  # sends current setting
-    try:
-        float(current_setting)
-        dc_supply.write('I' + str(channel) + ' ' + str(current_setting))
-        print('Current SET')
-    except Exception as e: 
-        print(type(e))
-        print('current setting not a value')
+def update_DC_values(dc_supply, dc_values, num_channels):   # updates both dc current and voltage on the supply
+    for i in num_channels:
+        print(i)
+        try:
+            float(dc_values[i][0])
+            dc_supply.write('V' + str(i) + ' ' + str(dc_values)) # sends voltage setting, most dc supplies accept this command syntax from what I have seen
+            print('Voltage SET')
+        except Exception as e: 
+            print(type(e))
+            print('-voltage setting not recognized-')
+        try:
+            float(dc_values[i][1])
+            dc_supply.write('I' + str(i) + ' ' + str(dc_values)) # sends current setting
+            print('Current SET')
+        except Exception as e: 
+            print(type(e))
+            print('-current setting not recognized-')
 
 def update_tab(window, parameter):
     window['_power_'].update(visible=parameter)
@@ -333,7 +376,7 @@ def make_window(theme):
                     # [sg.Input(justification='l', pad=((20,0),(0,0)), size=(20,2), key=('_Pb' + str(c) + '_')) for c in range(3)],
                     [sg.Text('Select DC Supply 2', font ='bold')],
                     [sg.Text('Select DC Supply 3', font ='bold')],
-                    [sg.Button('Ok', key='_OKP_'), sg.Button('Update', key='_UPDATEP_'), sg.Button('START', key='_STARTP_')]] # TO DO color start button green or red depending on whether all inputs are valid
+                    [sg.Button('Ok', pad=(5,10), key='_OKP_'), sg.Button('Update', pad=(5,10), key='_UPDATEP_'), sg.Button('START', pad=((600,20),(10,10)), key='_STARTP_')]] # TO DO color start button green or red depending on whether all inputs are valid
 
 
     freq_sweep_layout = [
@@ -386,7 +429,7 @@ def main():
     window = make_window(sg.theme())
     print(instr_list)
     # Check connection to all resources in Keysight resource library
-    instr_open()
+    # instr_open(rm)  # enable to check for connected instruments
     # Display and interact with the Window using an Event Loop
     while True:
         event, values = window.read(timeout=100)
@@ -458,7 +501,7 @@ def main():
 
         if event == '_UPDATEP0_' or event == '_UPDATEP_':                                        # sends values to instrument RF Supply        
             print('-------- Update (P0) --------')
-            if rf_input_check(values) == True:
+            if RF_input_check(values) == True:
                 update_RF_supply(values, 'power_tab')
             else:
                 print('rf input is invalid')
@@ -466,31 +509,22 @@ def main():
 
         if event == '_UPDATEP1_' or event == '_UPDATEP_':                                        # sends values to instrument DC supply 1
             print('-------- Update (P1) --------')                                                 # updateP1 button needs to be added, if just one instrument
-            voltage_setting_1 = values['_PDC1_0_0_']                                               # this entire event can probably be put into a single general function later on
-            voltage_setting_2 = values['_PDC1_1_0_']                                               # just generally tidied up
-            current_setting_1 = values['_PDC1_0_1_']
-            current_setting_2 = values['_PDC1_1_1_']
-            print(voltage_setting_1)
-            print(voltage_setting_2)
-            print(current_setting_1)
-            print(current_setting_2)
-            if dc_input_check(values, 'power') == True:
+            dc_values = get_DC_inputs(values, num_channels=2)
+            if DC_input_check(dc_values, num_channels=2) == True:
                 try:
-                    k = values['_PO2_']                                               
-                    index = instr_names.index(k)
-                    sel_address = instr_data[index][1]                                              # finds address for selected instrument
+                    sel_address = find_address(values, option_menu_key='_PO2_')                                        # finds address for selected instrument
                     DC1 = rm.open_resource(sel_address)
-                    update_voltage(DC1, voltage_setting_1, channel=1)                                           # updates DC supply voltages and currents on this device
-                    update_voltage(DC1, voltage_setting_2, channel=2)                                           
-                    update_current(DC1, current_setting_1, channel=1)
-                    update_current(DC1, current_setting_2, channel=2)      
-                except:
-                    print('-unable to recognise DC1 parameters please check-')
+                    update_DC_values(DC1, dc_values, num_channels=2)       
+                except Exception as e:
+                    print(type(e))
+                    print('-unable to load instrument please check-')
+                                                                # updates DC supply voltages and currents on this device
             else:
                 print('dc input is invalid')
+
         if event == '_STARTP_':
             print('-------- START Power Sweep --------')
-            if rf_input_check(values) == True:
+            if RF_input_check(values) == True:
                 start_POWER_sweep(values)
             else:
                 print('-cannot start sweep rf input is invalid-')
