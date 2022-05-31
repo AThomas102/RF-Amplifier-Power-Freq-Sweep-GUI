@@ -1,0 +1,472 @@
+# modules for building/running GUI widget
+import PySimpleGUI as sg
+from tkinter import *
+import tkinter as tk
+
+# numerical modules for calculations
+import math
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+from pylab import *
+import copy
+
+# interface for embedding matplotlib in Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg,\
+     NavigationToolbar2Tk
+matplotlib.use("tkagg")
+
+# file path location
+from os import path
+from win32com.client import Dispatch
+
+# dataframes for easy export to Excel
+import pandas as pd
+    
+
+# background_color ='#4c4ba3'
+
+class BuildGUI:
+
+    def __init__(self, window, canvasname):
+        self.window = window
+        self.canvasname = canvasname
+
+    def plot_ax(self, xname, yname):
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.set_xlabel(xname)
+        ax.set_ylabel(yname)
+        ax.grid()
+        self.canvas = self.window[self.canvasname].TKCanvas
+        self.fig = fig
+
+    def draw_fig(self, title, xData, yData):
+        plt.plot(xData, yData, 'k')
+        plt.title(title)
+        fig_canvas_agg = FigureCanvasTkAgg(self.fig, self.canvas)
+        fig_canvas_agg.draw()
+        fig_canvas_agg.get_tk_widget().pack(side='top', fill='both', expand=1)
+        return fig_canvas_agg
+
+    # change separator colour
+    def sep_colour(self, sepname, sepcolour):
+        style_name = sepname + "Line.TSeparator"
+        button_style = sg.ttk.Style()
+        button_style.theme_use(self.window.TtkTheme)
+        button_style.configure(style_name, background = sepcolour)
+        self.window[sepname].Widget.configure(style = style_name)
+
+
+
+class ButtonPressed():
+
+    def __init__(self, window):
+        # super().__init__()
+        self.window = window
+
+    def clear_input(self, key):
+        self.window.find_element(key).Update('')
+
+    def data_proc(self, dictSH, dicttemp):
+        res = []
+        arrSH = list(dictSH.values())
+        arrtemp = list(dicttemp.values())
+        Tmax = float(arrtemp[1]) + 273.15
+        Tmin = float(arrtemp[0]) + 273.15
+        Tstep = float(arrtemp[2])
+        temp = np.arange(Tmin,Tmax+Tstep,Tstep).tolist()
+        A = float(arrSH[0])
+        B = float(arrSH[1])
+        C = float(arrSH[2])
+        try:
+            for t in temp:
+                x = 1/C*(A-1/t)
+                y = math.sqrt((B/(3*C))**3+(x/2)**2)
+                r = exp((y-x/2)**(1./3) - (y+x/2)**(1./3))
+                res.append(r)
+            self.temp = temp
+            self.res = res
+        except:
+            temp = None
+            res = None
+        return temp, res
+
+    def write_str_to_inp(self, key, string):
+        element = self.window.find_element(key)
+        element.Update(string)
+        entry = self.window[key].Widget
+        entry.xview_moveto(1)
+
+
+class CallBack:
+    
+    def __init__(self, element):
+        self.element = element
+
+    def callback(self, var, index, mode):
+        """
+        For OptionMenu
+        var - tkinter control variable.
+        index - index of var, '' if var is not a list.
+        mode - 'w' for 'write' here.
+        """
+        print(window[self.element].TKStringVar.get())
+        window.write_event_value(self.element,
+                                 window[self.element].TKStringVar.get())
+
+
+def align_to_top(layout):
+    new_layout = []
+    for row in layout:
+        new_layout.append(sg.vtop(row))
+    return new_layout
+                                       
+
+# change border colours
+def border(elem):
+    return sg.Column([[elem]], background_color='Gray', pad=(0, (0, 0)))
+
+
+# superscript
+def get_sup(x):
+    subscript = str.maketrans('ABabcdefghijklmnoprstuvwxyz',\
+                              'ᴬᴮᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ')
+    res = x.translate(subscript)
+    return res
+
+
+# check if item float
+def is_float(x):
+    try:
+        float(x)
+        return True
+    except ValueError:
+        return False
+
+
+# check if item int
+def is_int(x):
+    try:
+        int(x)
+        return True
+    except ValueError:
+        return False
+
+
+# check if first char is digit
+def is_positive(x):
+    if x[0].isdigit() == True:
+        return True
+    else:
+        return False
+
+
+# error control for SH-H parameter inputs
+def sh_params_check(dictSH):
+    clearkeys = []
+    errormess = False
+    emptySH = False
+    arrSH = list(dictSH.values())
+    for item in arrSH:
+        if item == '':
+            emptySH = True
+    for ii in range(0, len(arrSH)):    
+        if (is_float(arrSH[ii]) == False or\
+           is_positive(arrSH[ii]) == False) and emptySH == False:      
+            if errormess == False:
+                sg.popup_error(f'Please input real, positive numbers '
+                               'for Steinhart-Hart constants.')
+                errormess = True
+            key = str(list(dictSH.keys())[ii])
+            clearkeys.append(key)
+    return clearkeys, emptySH
+
+
+# error control for TEC temperature inputs
+def temps_check(dicttemp):
+    clearkeys = []
+    errormess = False
+    emptytemp = False
+    arrtemp = list(dicttemp.values())
+    for item in arrtemp:
+        if item == '':
+            emptytemp = True
+    for ii in range(0, len(arrtemp)):
+        if is_float(arrtemp[ii]) == False:
+            if errormess == False and emptytemp == False:
+                sg.popup_error(f'Please input real numbers for '
+                               'temperatures.')
+                errormess = True
+            key = str(list(dicttemp.keys())[ii])
+            clearkeys.append(key)
+    if len(clearkeys) == 0 and emptytemp == False:
+        if float(arrtemp[1]) <= float(arrtemp[0]):
+            sg.popup_error(f'Maximum temperature must be greater than'
+                           ' minimum temperature.')
+            for ii in range(0,2):
+                clearkeys.append(str(list(dicttemp.keys())[ii]))
+        elif (float(arrtemp[1])-float(arrtemp[0]))%float(arrtemp[2]) != 0:
+            sg.popup_error(f'(Tmax - Tmin)/Tstep must be integer value.')
+            for ii in range(0,3):
+                clearkeys.append(str(list(dicttemp.keys())[ii]))  
+    return clearkeys, emptytemp
+
+
+    
+
+# builds GUI and calls functions
+if __name__ == "__main__":
+    
+    # standard theme colour
+    sg.theme('DarkBlue4')
+
+    fileextarr = ('.svg', '.png', '.jpg')
+    headersRT = ['Temperature ' + get_sup('(oC)'), 'Resistance (kΩ)']
+
+    layoutcontr = [
+        [sg.Radio('TEC','cm', key ='TEC', size=(5,1)),
+         sg.Radio('D/A Convolution','cm', key ='D/A Convolution', size=(12,1)),
+         sg.Radio('Manual','cm', key ='Manual', size=(7,1))]
+        ]
+
+    optionscontr = [
+    [sg.Frame('', layoutcontr, element_justification='c',
+              title_color = 'Plum3', font='bold 13', border_width=3)]
+    ]
+
+    layoutSH = [
+        [sg.Text('Steinhart-Hart coefficients:',font='bold 11')],
+        [sg.Text('A:',size=(4,1)),
+         sg.In('',size=(6,1),key='_A', background_color = 'white'),
+        sg.Text('B:',size=(4,1)),
+         sg.In('',size=(6,1),key='_B', background_color = 'white'),
+        sg.Text('C:',size=(4,1)),
+         sg.In('',size=(6,1),key='_C', background_color = 'white')],
+        [sg.Text('')],
+        [sg.Text(headersRT[0],font='bold 11')],
+        [sg.Text('Min:',size=(4,1)),
+         sg.In('',size=(6,1),key='_Tmin', background_color = 'white'),
+        sg.Text('Max:',size=(4,1)),
+         sg.In('',size=(6,1),key='_Tmax', background_color = 'white'),
+        sg.Text('Step:',size=(4,1)),
+         sg.In('',size=(6,1),key='_Tstep', background_color = 'white')],
+        [sg.Text('')],
+        [sg.Button('Plot R-T relation curve',font='bold 11',
+                   button_color='Gray58', key = '_PlotRT'),
+         sg.Button('Clear parameters',font='bold 11',button_color='Gray58',
+                   key='_ClearTECparams')]]
+
+
+    layoutNTC = [
+        [sg.Text('Input additional series resistance:', font='bold 11'),
+         sg.In(size=(6,1), key='_InpExtraR', background_color = 'white'),
+         sg.Text('kΩ')],
+        [sg.Text('Display values with', font='bold 11'),
+         sg.OptionMenu(values=['no additional resistance',
+                               '+ added series resistance'],
+                       key='_AddR', default_value='no additional resistance')],
+          [sg.Table(values=[['0','0'],['0','0']], key='_TableRT',
+                   headings = ['Temperature ' + get_sup('(oC)'),
+                              'Resistance (kΩ)'],
+                   auto_size_columns=True, display_row_numbers=False,
+                   tooltip = 'Thermistor RT', font = 'bold 12',
+                   background_color='Lavender', header_font='bold 13',
+                   selected_row_colors = ['MediumPurple4','Plum3'],
+                   text_color = 'MediumPurple4',
+                   header_text_color='MediumPurple4')],
+          [sg.Text("Spreadsheet name: ", font='bold 11'),
+           sg.In(size=(12,1), key='_SSnameRT', background_color = 'white'),
+           sg.Button('Open in Excel', font='bold 11', button_color='Gray58',
+                     key = '_ExcelRT')]
+          ]
+
+    layoutRT = [
+        [sg.Canvas(size=(700, 550), key='_CanvasRT')],
+        [sg.Text("Input file name and choose file extension: ",
+                  font='bold 11'),
+         sg.In(size=(12,1), key='_FignameRT', background_color = 'white'),
+         sg.OptionMenu([f'{ext}' for ext in fileextarr],
+                    size=(4, 1), key='_GraphextRT'),
+        sg.Button('Export fig',font='bold 11', button_color='Gray58',
+                   key = '_ExportRT')]
+         ]
+        
+
+    layoutSMU = [
+        [sg.Text('V-bias (V):',font='bold 11',size=(10,1))],
+        [sg.Text('Min',size=(4,1)),sg.InputText('',size=(6,1)),
+        sg.Text('Max',size=(4,1)),sg.InputText('',size=(6,1)),
+        sg.Text('Step',size=(4,1)),sg.InputText('',size=(6,1))],
+        [sg.Text('I-bias (A):',font='bold 11',size=(10,1))],
+         [sg.Text('Limit',size=(4,1)),sg.InputText('',size=(6,1))]
+        ]
+
+    optionsconfig = [
+        align_to_top([sg.Frame('NTC Thermistor Steinhart-Hart Model', layoutSH,
+                  element_justification='c', title_color = 'White',
+                  font='bold 13', border_width=3, size=(310,350)),
+         sg.Frame('Calculated Thermistor Resistance', layoutNTC,
+                 element_justification='c', title_color = 'White',
+                 font='bold 13', border_width=3, key='_NTCval',
+                  visible=False, size=(440,350))]),
+        [sg.Frame('', layoutRT, border_width=0, key='_RTgraph',visible=False,
+                  element_justification='c')]
+                ]
+
+    layout2 = []
+    layout3 = []
+
+
+    tabgrp = [[sg.TabGroup([[sg.Tab('Configuration', optionsconfig,
+                                    tooltip='Configuration',
+                                    element_justification= 'center'),
+                             sg.Tab('Control', optionscontr,
+                                    tooltip='Control',
+                                    element_justification= 'center'),
+                             sg.Tab('IV Test', layout2, tooltip = 'IV Test',
+                                    element_justification= 'center'),
+                             sg.Tab('Dark Counts', layout3,
+                                    tooltip='Dark Counts',
+                                    element_justification= 'center')]],
+                           tab_location='centertop', title_color='White',
+                           tab_background_color='#494ca2',
+                           selected_title_color='Black',
+                           selected_background_color='#c6cbef',
+                           border_width=5)]]
+
+
+    window = sg.Window("SPAD Testbed", tabgrp, finalize=True, location=(30, 80),
+                       resizable=True)
+    CB1 = CallBack('_AddR')
+    window['_AddR'].TKStringVar.trace("w", CB1.callback)
+    CB2 = CallBack('_GraphextRT')
+    window['_GraphextRT'].TKStringVar.trace("w", CB2.callback)
+            
+    while True:
+        event, values = window.read()
+        
+        if event == "Exit" or event == sg.WIN_CLOSED:
+            break
+        
+        elif event == '_PlotRT':
+            A = values['_A']
+            B = values['_B']
+            C = values['_C']
+            Tmin = values['_Tmin']
+            Tmax = values['_Tmax']
+            Tstep = values['_Tstep']
+            dictSH = {"_A":A, "_B":B, "_C":C}
+            dicttemp = {"_Tmin":Tmin, "_Tmax":Tmax, "_Tstep":Tstep}
+            clearparamsSH, emptySH = sh_params_check(dictSH)
+            clearparamstemp, emptytemp = temps_check(dicttemp)
+            clearparams = []
+            
+            if len(clearparamsSH) != 0:
+                for item in clearparamsSH:
+                    clearparams.append(item)
+                    
+            if len(clearparamstemp) != 0:
+                for item in clearparamstemp:
+                    clearparams.append(item)
+                    
+            emptyvars = emptytemp or emptySH
+            BP = ButtonPressed(window)
+            
+            if len(clearparams) == 0 and not emptyvars:
+                temp, res = BP.data_proc(dictSH, dicttemp)
+                table = [[]]
+                if temp and res:
+                    for ii in range(0,len(temp)):
+                        temp[ii] = temp[ii]-273.15
+                        res[ii] = res[ii]/1e3
+                        rest = round(res[ii], 3)
+                        row = [temp[ii],rest]
+                        table.append(row)
+                    table = [row for row in table if row]
+                    BG = BuildGUI(window,'_CanvasRT')
+                    BG.plot_ax(headersRT[0],headersRT[1])
+                    fig = BG.draw_fig('NTC Thermistor Temperature against '
+                                      'Expected Resistance',
+                                      temp, res)
+                    window['_TableRT'].update(values = table[:][:])
+                    window['_RTgraph'].update(visible=True)
+                    window['_NTCval'].update(visible=True)
+                    window.refresh
+                        
+                else:
+                    sg.popup_error(f'Calculation error') 
+            elif emptyvars:
+                sg.popup_error(f'Please ensure all parameters contain values.')
+            else:
+                for ii in range(0,len(clearparams)):
+                    BP.clear_input(clearparams[ii])
+                    
+        elif event == '_ClearTECparams':
+            paramstoclear = ['_A','_B','_C','_Tmin','_Tmax','_Tstep']
+            BP = ButtonPressed(window)
+            for item in paramstoclear:
+                BP.write_str_to_inp(item,'')
+
+
+        elif event == '_AddR':
+            res = values['_InpExtraR']
+            if values['_AddR'] == '+ added series resistance':
+                if res != '' and is_positive(res)==True and is_float(res)==True:
+                    table2 = copy.deepcopy(table)
+                    for ii in range(0, len(table2)):
+                        table2[ii][1] = table[ii][1] + float(res)
+                    print(table2)
+                    window['_TableRT'].update(values = table2[:][:])
+                    window['_InpExtraR'].update(disabled=True)
+                    
+                else:
+                    sg.popup_error(f'Please input a real positive value for '
+                                   'additional series resistance.')
+            elif values['_AddR'] == 'no additional resistance':
+                print(table)
+                window['_TableRT'].update(values = table[:][:])
+                window['_InpExtraR'].update(disabled=False)
+
+
+        elif event == '_ExportRT':
+            folder = sg.popup_get_folder('Export to location', no_window = True)
+            if folder == '':
+                sg.popup_error(f"Folder not selected.")
+            else:
+                filename = values['_FignameRT']
+                fileext = f'{window["_GraphextRT"].get()}'
+                fileext = fileext.strip("'[]")
+                if filename != '' and fileext != '':
+                    fileloc = folder + '/' + filename + fileext
+                    plt.savefig(fileloc)
+                else:
+                    sg.popup_error(f"Please ensure file name and extensions "
+                                   "are selected.")
+                    
+
+        elif event == '_ExcelRT':
+            folder = sg.popup_get_folder('Export to location', no_window = True)
+            if folder == '':
+                sg.popup_error(f"Folder not selected.")
+            else:
+                df = pd.DataFrame(columns=['Temperature/dC','Resistance/kOhms'])
+                for ii in range(0, len(table)):
+                    df.loc[ii] = table[ii][:]
+                df.loc[ii+1] = ['','']
+                df.loc[ii+2] = ['SH Parameters',' ']
+                keys = list(dictSH.keys())
+                paramsSH = list(dictSH.values())
+                for jj in range(0, len(keys)):
+                    keys[jj] = keys[jj].strip('_')
+                    df.loc[ii+3+jj] = [keys[jj], paramsSH[jj]]
+                filename = values['_SSnameRT']
+                if filename != '':
+                    xl = Dispatch("Excel.Application")
+                    xl.Visible = True # otherwise excel is hidden
+                    df.to_csv(filename + '.csv', mode="a", index=False)
+                else:
+                    sg.popup_error(f"Please ensure spreadsheet name selected.")
+
+
+    window.close()
