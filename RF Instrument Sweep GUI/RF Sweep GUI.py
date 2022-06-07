@@ -1,6 +1,7 @@
 
 # used imports:
 from cgitb import text
+from re import L
 from shutil import ExecError
 import PySimpleGUI as sg
 import numpy as np
@@ -10,6 +11,47 @@ import os
 import time
 import datetime
 
+
+
+def pad_dict_list(dict_list, padel):
+        lmax = 0
+        for lname in dict_list.keys():
+            lmax = max(lmax, len(dict_list[lname]))
+        for lname in dict_list.keys():
+            ll = len(dict_list[lname])
+            if  ll < lmax:
+                dict_list[lname] += [padel] * (lmax - ll)
+        return dict_list
+
+def get_title():
+        try:
+            name_dic = []
+            file_string = ''
+            date = datetime.datetime.now().strftime('%d_%m_%Y')
+            time = datetime.datetime.now().strftime('%H-%M-%S')
+            cwfreq = values['_pwr_RF0_0_'] # cw freq
+            start = values['_pwr_RF0_1_']   # start
+            stop = values['_pwr_RF0_2_']    # stop
+
+            if values['_DATE_'] == True:
+                name_dic.append(date)
+            if values['_TIME_'] == True:
+                name_dic.append(time)
+            if values['_CWFREQ_'] == True:
+                name_dic.append(cwfreq)
+            if values['_SSP_'] == True:
+                name_dic.append(start)
+                name_dic.append(stop)
+            file_string = ' '.join(name_dic)
+            # for nam in name_dic:
+            #     file_string = file_string + str(nam) + ' '
+            file_string = file_string[1:-1] # remove last space     
+        except Exception as e:
+            print(type(e))
+            print('-file name could not be generated-')
+            file_string = 'export data'
+        return file_string
+        
 class BuildGui:
 
     def __init__(self, window):
@@ -80,44 +122,38 @@ class InstrConnect:
 
     name = {'DC Power Supply (1)':'DC1','DC Power Supply (2)':'DC2',
             'DC Power Supply (3)':'DC3','DC Power Supply (4)':'DC4', 'Vector Signal Generator':'RF1'}
-    addr = {}
+    addr = {'DC1':'','DC2':'','DC3':'','DC4':''}
     chs = {'DC1':1,'DC2':0,'DC3':0,'DC4':0}
+    rfaddr = {'RF1':''}
 
     def __init__(self, rm):
         self.instrlist = rm.list_resources()
 
     def instr_check(self, rm):
+        time.sleep(0.1) # give the resource manager time
         connected = []
+        names = []
         print(self.instrlist)
         for addr in self.instrlist:
+            channels = '-'
             try:
                 rsrc = rm.open_resource(addr)
-                idn = rsrc.query('*IDN?')
-                try:
-                    for ch in range(4):
-                        v = float(rsrc.query('V' + str(ch) + 'O?'))    # for CPX400DP power supply
-                        if v:
-                            channels = ch+1
-                except:
-                    pass
-                if idn:
-                    connected.append([idn, addr, channels])
-            except:
-                pass 
-        return connected
-    
-    def DCSupply_check_channels(self, rm):
-        for supply in self.name:
-            try:
-                dc_supply = rm.open_resource(self.addr[supply])
-                for ch in range(4):
-                    v = float(dc_supply.query('V' + str(ch) + 'O?'))    # this command is for the CPX400DP power supply
-                    self.chs[supply] = ch+1
+                idn = rsrc.query('*IDN?').strip()
+                for ch in range(4): # check for number of channels
+                    value = rsrc.query('V' + str(ch+1) + 'O?')    # for CPX400DP power supply
+                    if value:
+                        channels = ch+1
             except:
                 pass
-        return self.chs
+            if idn in names:
+                pass
+            elif idn:
+                names.append(idn)
+                connected.append([idn, addr, channels, ''])
+        print(connected)
+        return connected
 
-class ManageInputs(InstrConnect):
+class ManageInputs():
 
     DCinputs = {'DC1':[],'DC2':[],'DC3':[],'DC4':[]}
     RFinputs = {}
@@ -158,8 +194,7 @@ class ManageInputs(InstrConnect):
                      + str(supply) + '_' + str(j) + '_' + str(i-j) + '_'])
                     current = float(values['_' + str(self.cur_tab) + '_'
                      + str(supply) + '_' + str(j) + '_' + str(i-j+1) + '_'])
-                    print(voltage)
-                    print(current)
+
                     if  0 <= voltage <= 30 and (100*voltage)%1 == 0:                           
                         print('OK Voltage on channel:', str(i+1))
                     else:
@@ -179,22 +214,67 @@ class ManageInputs(InstrConnect):
         print('DC parameters OK')
         return 1
 
-    def enable_channel_inputs(self, window):
-        for supply in self.chs:             # for all supplies
-            for i in range(4):               # for all channels
-                window['_' + str(self.cur_tab) + '_' + str(supply)
-                         + '_' + str(j) + '_' + str(i-j) + '_'].update(disabled=True) # disable all dc inputs
-            for i in range(self.chs[supply]):  
-                if i%2 == 0: j = 0
-                else: j = 1
-                window['_' + str(self.cur_tab) + '_' + str(supply)
-                         + '_' + str(j) + '_' + str(i-j) + '_'].update(disabled=False) # reenable available channels
+    def table_update(self, window):
+        rowselected = []
+        rowselected = [connected[row] for row in values['_INSTR.TABLE_']]
+        if rowselected != []:
+            function = values['_INSTR.FUNC_']
+            for i in range(len(connected)):
+                if connected[i][3] == function:
+                    connected[i][3] = ''
+            try:
+                prev_name = IC.name[rowselected[0][3]]
+                IC.addr[prev_name] = ''
+                IC.chs[prev_name] = 0
+            except:
+                pass
+            rowselected[0][3] = function
+            name = IC.name[function]
+            window['_INSTR.TABLE_'].update(values=connected)
+            if 'DC Power Supply' in function:
+                IC.addr[name] \
+                = rowselected[0][1]    # add instr addr to dic
+                IC.chs[name] \
+                = rowselected[0][2]    # add instr chs to dic
+                return 'DC Power Supply'
+            elif 'Vector Signal Generator' in function:
+                IC.rfaddr[name] \
+                = rowselected[0][1]
+                return 'Vector Signal Generator'
+        else:
+            return False
 
-    def disable_inputs(self, window, disabled):           # disable all inputs/other that might need disabling before the sweep start
-        for supply in self.addr:    # disable all dc inputs            
-            for i in range(4):               
-                window['_' + str(self.cur_tab) + '_' + str(supply)
-                         + '_' + str(j) + '_' + str(i-j) + '_'].update(disabled=disabled) 
+    def enable_channel_inputs(self, window):
+        print(self.chs)
+        try:    # if not type(int)
+            for supply in self.chs:
+                for i in range(4):
+                    for j in range(2): 
+                        window['_' + str(self.cur_tab) + '_' + str(supply)
+                                + '_' + str(j) + '_' + str(i) + '_'].update(disabled=True)
+            for supply in self.chs: 
+                print(self.chs[supply])
+                for ch in range(self.chs[supply]):  # reenable available channels
+                    print(ch)
+                    j = ch%2
+                    if ch>1: i = 2
+                    else: i = 0
+                    print(i)
+                    print(j)
+                    window['_' + str(self.cur_tab) + '_' + str(supply)
+                            + '_' + str(j) + '_' + str(i) + '_'].update(disabled=False) 
+                    window['_' + str(self.cur_tab) + '_' + str(supply)
+                            + '_' + str(j) + '_' + str(i+1) + '_'].update(disabled=False) 
+        except Exception as e:
+            print(type(e))
+            print('-Selected instrument not a DC supply-')       # the dc supply does not recognise the voltage read command
+
+    def disable_inputs(self, window, disabled):           # disable all inputs
+        for supply in self.addr:               
+            for i in range(4):
+                for j in range(2):               
+                    window['_' + str(self.cur_tab) + '_' + str(supply)
+                            + '_' + str(j) + '_' + str(i) + '_'].update(disabled=disabled) 
 
     def get_RF_inputs(self, values):
         if str(self.cur_tab) == 'pwr':
@@ -202,7 +282,7 @@ class ManageInputs(InstrConnect):
             self.RFinputs['start'] = float(values['_pwr_RF0_1_'])
             self.RFinputs['stop'] = float(values['_pwr_RF0_2_'])
             self.RFinputs['step'] = float(values['_pwr_RF0_3_'])
-        print(self.RFinputs)
+        # print(self.RFinputs)
         return self.RFinputs
     
     def RF_input_check(self, values):
@@ -249,19 +329,19 @@ class InstrControl():
         self.name = InstrConnect.name
         self.chs = InstrConnect.chs
         self.addr = InstrConnect.addr
+        self.rfaddr = InstrConnect.rfaddr
         self.DCinputs = ManageInputs.DCinputs
         self.RFinputs = ManageInputs.RFinputs
-        self.parent_dir = default_folder
 
 
     def update_DC_values(self, rm):   # updates both dc current and voltage on the supply
-         for supply in self.chs:             # for all supplies
+        for supply in self.chs:             # for all supplies
             for i in range(self.chs[supply]):  # for all channels
                 try :
-                    dc_supply = rm.open_resource(self.addr(supply))
+                    dc_supply = rm.open_resource(self.addr[supply])
                     voltage = float(self.DCinputs[supply][i][0])
                     dc_supply.write('V' + str(i+1) + ' ' + str(voltage)) # sends voltage setting, most dc supplies accept this command syntax from what I have seen
-                    print('Voltage SET on channel ' + str(i))
+                    print('Voltage SET on channel ' + str(i+1))
                     time.sleep(0.1)
                 except Exception as e: 
                     print(type(e))
@@ -269,13 +349,14 @@ class InstrControl():
                 try:
                     current = float(self.DCinputs[supply][i][1])
                     dc_supply.write('I' + str(i+1) + ' ' + str(current)) # sends current setting
-                    print('Current SET on channel ' + str(i))
+                    print('Current SET on channel ' + str(i+1))
                     time.sleep(0.1)
                 except Exception as e: 
                     print(type(e))
                     print('-current setting not recognized-')
+        print('DC values updated successfully')
 
-    def export_to_csv(parent_dir, export_data, values):
+    def export_to_csv(export_data):
         flat_data = {}
         flat_data['rf IN power (dBm)'] = export_data['rf_in']['pwr']  # adds data for rf vector supply
         for instr in export_data:             # adds data for dc supplies
@@ -291,11 +372,15 @@ class InstrControl():
                         flat_data[str(instr) + ', Channel ' + str(ch) + ' Current (A)'].append(current)
         print(flat_data.keys())
         try:
-            flat_data = InstrControl.pad_dict_list(flat_data, '-')
+            flat_data = pad_dict_list(flat_data, '-')
             df = pd.DataFrame(flat_data, columns=flat_data.keys())
-            dt_string = get_title(values)
-            output_folder = values['_INPUT_']
-            df.to_csv(str(parent_dir) +'/' + str(output_folder) + '/' + str(dt_string) + '.csv', header=True)
+            dt_string = get_title()
+            if folder == []:
+                output_folder = default_folder
+            else:
+                output_folder = folder
+            df.to_csv(str(output_folder) + '/' + str(dt_string) + '.csv', header=True)
+            print('exported at: ', str(output_folder))
         except Exception as e:
             print(type(e))
             print('-data export to csv unsuccessful-')
@@ -305,62 +390,77 @@ class InstrControl():
 
 
     def get_name(self, val):
-        for key, value in self.name.items():
-            if val == value:
-                return key
+        try:
+            for key, value in self.name.items():
+                if val == value:
+                    return key
+        except:
+            return 'None'
 
-    def get_DC_values(self, dc_supplies, data_out): # gets the data for all dc devices 
+    def get_DC_values(chs, dc_supplies, data_out): # gets the data for all dc devices 
         for supply in dc_supplies:
-            for ch in range(self.chs[supply]):
+            for ch in range(chs[supply]):
                 try:
-                    current = dc_supplies[supply].query('I' + str(ch) + 'O?')    # this command is for the CPX400DP power supply
+                    current = dc_supplies[supply].query('I' + str(ch+1) + 'O?')    # this command is for the CPX400DP power supply
                 except Exception as e:
                     print(type(e))
                     current = '-'
                 try:
-                    voltage = dc_supplies[supply].query('V' + str(ch) + 'O?')
+                    voltage = dc_supplies[supply].query('V' + str(ch+1) + 'O?')
                 except Exception as e:
                     print(type(e))
                     voltage = '-'
                 try:
                     current_values = voltage, current
-                    data_out[supply]['ch' + str(ch)].append(current_values)     
+                    data_out[supply][ch+1].append(current_values)     
                 except Exception as e:
                     print(type(e))
                     current_values = '-','-'
-                    data_out[supply]['ch' + str(ch)].append(current_values)
-                print('supply' + str(supply) + ', channel: ' + str(ch) + \
+                    data_out[supply][ch+1].append(current_values)
+                print('supply' + str(supply) + ', channel: ' + str(ch+1) + \
                  ' V = ', str(voltage),', I = ', str(current))
                     
         return data_out
 
+    def toggle_channels(chs, dc_supplies, enabled): # toggle on dc channels
+        for supply in dc_supplies:
+            for ch in range(chs[supply]):
+                dc_supplies[supply].write('OP' + str(ch) + ' ' + str(enabled))  
 
-    def start_POWER_sweep(self, values):  # starts power sweep when start button is pressed
+    def start_POWER_sweep(self):  # starts power sweep when start button is pressed
         
         complete = False
-        instr_out_data = {'':{'':[]}}   # create all channel data lists
+        instr_out_data = {}   # create all channel data lists
         dc_supplies = {}
         for supply in self.chs:    # for all supplies
+            channels = {}
             for ch in range(self.chs[supply]):       # for all channels
-                instr_out_data[supply][str(ch+1)] = []
-        instr_out_data['rf_in']['pwr'] = []
-        instr_out_data['rf_out']['pwr'] = []
+                channels[ch+1] = []
+                print(channels)
+            instr_out_data[supply] = channels 
+            print(instr_out_data)
+        rfin = {'pwr':[]}
+        rfout = {'pwr':[]}
+        instr_out_data['rf_in'] = rfin
+        instr_out_data['rf_out'] = rfout
         print(instr_out_data)   
 
         try:  # connects to the rf supply if it is not already connected
-            rf_supply = rm.open_resource(self.addr['RF']) # this might close
-        except Exception as e:                            # may need to reopen resource
+            rf_supply = rm.open_resource(self.rfaddr['RF1']) 
+        except Exception as e:                            
             print(type(e))
             print('Connection to RF supply failed, sweep failed')
             return 1   # exits function if rf supply is not connected
         try:
             for supply in self.addr:  # connects to the dc supply if it is not already connected
-                dc_supplies[supply] = rm.open_resource(self.addr[supply])
-        except Exception as e:
+                if self.addr[supply] != '':
+                    print('opening instrument ' + str(supply))
+                    dc_supplies[supply] = rm.open_resource(self.addr[supply])
+        except Exception as e: 
             print(type(e))
             print('Connection to ' + str(InstrControl.get_name(supply)) + ' failed')
 
-        InstrControl.toggle_channels(dc_supplies, enabled=1)
+        InstrControl.toggle_channels(self.chs, dc_supplies, enabled=1)
         rf_supply.write('*RST')
         rf_supply.write('*CLS')
         rf_supply.write('SOURce1:FREQuency:CW ' + str(self.RFinputs['freq']) + ' GHz')
@@ -381,59 +481,34 @@ class InstrControl():
                 current_rf_power = '-'
                 instr_out_data['rf_in']['pwr'].append(current_rf_power)
             print('current rf power = ' + str(current_rf_power))
-            instr_out_data = InstrControl.get_DC_values(dc_supplies, instr_out_data)
+            instr_out_data = InstrControl.get_DC_values(self.chs, dc_supplies, instr_out_data)
             if current_rf_power >= self.RFinputs['stop']:       # check whether sweep is complete
                 complete = True
-        InstrControl.toggle_channels(dc_supplies, enabled=0)
-        print('-RF Power Sweep Complete-')
-        if InstrControl.export_to_csv(self.parent_dir, instr_out_data, values) == True:
+        rf_supply.write('OUTPut:ALL:STATe 0')   # turn off RF
+        InstrControl.toggle_channels(self.chs, dc_supplies, enabled=0)
+        print('RF Power Sweep Complete')
+        # print(instr_out_data)
+        if InstrControl.export_to_csv(instr_out_data) == True:
             print('Export to CSV successful')
         else:
-            print('Export unsuccesful')
-        return 0
+            print('Export unsuccesful, data manipulation error ')
+        return 0         
 
-    def toggle_channels(self, dc_supplies, enabled): # toggle on dc channels
-        for supply in dc_supplies:
-            for ch in range(self.chs[supply]):
-                dc_supplies[supply].write('OP' + str(ch) + ' ' + str(enabled))           
-
-    def pad_dict_list(dict_list, padel):
-        lmax = 0
-        for lname in dict_list.keys():
-            lmax = max(lmax, len(dict_list[lname]))
-        for lname in dict_list.keys():
-            ll = len(dict_list[lname])
-            if  ll < lmax:
-                dict_list[lname] += [padel] * (lmax - ll)
-        return dict_list
-
-def get_title():
+    def test_supplies(self):
         try:
-            name_dic = []
-            file_string = ''
-            date = datetime.datetime.now().strftime('%d_%m_%Y')
-            time = datetime.datetime.now().strftime('%H-%M-%S')
-            cwfreq = values['_pwr_RF0_0_'] # cw freq
-            start = values['_pwr_RF0_1_']   # start
-            stop = values['_pwr_RF0_2_']    # stop
-
-            if values['_DATE_'] == True:
-                name_dic.append(date)
-            if values['_TIME_'] == True:
-                name_dic.append(time)
-            if values['_CWFREQ_'] == True:
-                name_dic.append(cwfreq)
-            if values['_SSP_'] == True:
-                name_dic.append(start)
-                name_dic.append(stop)
-            for nam in name_dic:
-                file_string = file_string + str(nam) + ' '
-            file_string = file_string[1:-1] # remove last space     
+            dc_supplies = {}
+            for supply in self.addr:  # connects to the dc supply if it is not already connected
+                if self.addr[supply] != '':
+                    print('opening instrument ' + str(supply))
+                    dc_supplies[supply] = rm.open_resource(self.addr[supply])
+            IK.toggle_channels(dc_supplies, enabled=1)
+            time.sleep(1)
+            IK.toggle_channels(dc_supplies, enabled=0)
         except Exception as e:
             print(type(e))
-            print('-file name could not be generated-')
-            file_string = 'export data'
-        return file_string
+            return 0
+        print('error turning on channels')
+
         
 
 
@@ -442,14 +517,15 @@ if __name__ == '__main__':
     frqsuff = ['Hz', 'kHz', 'MHz', 'GHz']
     default_folder = 'C:/Users/AndrewThomas/OneDrive - ' + \
         'CSA Catapult/Documents/Equipment VISA Integration/RF sweep data'
+    folder = []
     # standard theme colour
     sg.theme('DarkBlue4')
     BG = BuildGui(window=None)
     setup_col_1 = [[sg.Button('Search Instruments', key='_INSTR.SEARCH_',
                               font='bold 11', button_color='Gray58')],
-                   [sg.Table(size=(80,1), values=[['','','']],
+                   [sg.Table(size=(80,1), values=[['','','','']],
                              headings=['Instrument ID', 'VISA Address',
-                                       'Instrument Function', 'Channels'],
+                                       'Channels', 'Instrument Function'],
                              max_col_width=25, text_color='black',
                              background_color='White', auto_size_columns=True,
                              display_row_numbers=False, justification='right',
@@ -537,7 +613,7 @@ if __name__ == '__main__':
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('pwr')],
         [sg.Button('Ok', pad=(5,10), key='_OKP_'),
-         sg.Button('Update', pad=(5,10), key='_UPDATEP_'),
+         sg.Button('Update', pad=(5,10), key='_UPDATEP_', visible=False),
          sg.Button('START', pad=((600,20),(10,10)), key='_STARTP_')], 
           # TO DO, color start button green or red depending on whether all inputs are valid
     ]
@@ -577,44 +653,46 @@ if __name__ == '__main__':
     while True:
         event, values = window.read()  
         IC = InstrConnect(rm)
+        MI = ManageInputs()
+        IK = InstrControl()
         if event == 'Exit' or event == sg.WIN_CLOSED:
             break
         if event not in (sg.TIMEOUT_EVENT, sg.WIN_CLOSED):  # enable to show all key values
             print('============ Event = ', event, ' ==============')
-            print('-------- Values Dictionary (key=value) --------')
-            for key in values:
-                print(key, ' = ',values[key])
+            # print('-------- Values Dictionary (key=value) --------')
+            # for key in values:
+            #     print(key, ' = ',values[key])
 
         if event == '_INSTR.SEARCH_':
+            window['_INSTR.TABLE_'].update(values=[['','','','']])
             connected = IC.instr_check(rm)
             window['_INSTR.TABLE_'].update(values=connected)
             
             if len(connected) == 0:
                 sg.popup_error(f'No connected instruments detected. Ensure '
                                'instrument connected and search again.')
+
+        elif event == '_UPDATE.INSTR_':
+            if values['_SLCT.INSTR_'] != '' and values['_INSTR.FUNC_'] != '':
+                device_type =  MI.table_update(window)
+                if device_type == 'DC Power Supply':
+                    try:
+                        MI.enable_channel_inputs(window)
+                    except:
+                        print('Channel enable failed')
+                elif device_type == 'Vector Signal Generator':
+                    None
+            else:
+                sg.popup_error(f'Make sure instrument and functionality '
+                                'both selected in order to update table.')
         
         elif event == '_INSTR.TABLE_':
             try:
                 rowselected = [connected[row] for row in values[event]]
-                instrselected = rowselected[0]
+                instrselected = rowselected[0][0]
                 window['_SLCT.INSTR_'].update(instrselected)
             except:
-                sg.popup_error(f'Select correct connection when '
-                               'displayed in the table.')
-
-        elif event == '_UPDATE.INSTR_':
-            if values['_SLCT.INSTR_'] != '' and values['_INSTR.FUNC_'] != '':
-                connected[rowselected][2] = values['_INSTR.FUNC_']
-                InstrConnect.addr[InstrConnect.name['_INSTR.FUNC_']] \
-                 = connected[rowselected][1]    # add instr addr to dic
-                InstrConnect.chs[InstrConnect.name['_INSTR.FUNC_']] \
-                 = connected[rowselected][3]    # add instr chs to dic
-                
-                window['_INSTR.TABLE_'].update(values=connected)
-                MI.enable_channels(window)
-            else:
-                sg.popup_error(f'Make sure instrument and functionality '
-                                'both selected in order to update table.')
+                pass
             
 
         elif event == '_PWR.SWEEP_':
@@ -630,29 +708,45 @@ if __name__ == '__main__':
             if folder != '':
                 sg.popup('You chose: ' + str(folder), keep_on_top=True)
                 window['_FOLDER_'].update('save in: ' + str(folder))
-                InstrControl.parent_dir = str(folder)
             else: sg.popup('Folder is invalid', keep_on_top=True)
 
         elif event == '_OKF_' or event == '_OKP_':                                           
             print('-------- OK --------')                                                               
-            try:
-                MI = ManageInputs(IC.chs, IC.addr)
-                if MI.DC_input_check(values) == True:
-                    if MI.RF_input_check(values) == True:
-                        DCinputs = MI.get_DC_inputs(values)
-                        RFinputs = MI.get_RF_inputs(values)
-                    else:
-                        print('RF signal generator input is invalid')
-                else:
-                    print('DC supply input is invalid')
-            except:
-                print('Instrument connect not completed')
-                
-        elif event == '_UPDATEP0_' or event == '_UPDATEP_':
-            print('-------- Update (P0) --------')
+            # try:
             if MI.DC_input_check(values) == True:
                 if MI.RF_input_check(values) == True:
-                    IC = InstrControl(IC.chs, IC.addr, MI.DCinputs)
-                        
+                    MI.get_DC_inputs(values)
+                    MI.get_RF_inputs(values)
+                    IK.update_DC_values(rm)
+                    # IK.test_supplies() turns on all dc channels for 1 second
+                else:
+                    print('RF signal generator input is invalid')
+            else:
+                print('DC supply input is invalid')
+            # except Exception as e:
+            #     print(type(e))
+            #     print('Instrument connect not completed')
+                
+        # elif event == '_UPDATEP0_' or event == '_UPDATEP_':
+        #     print('-------- Update (P0) --------')
+        #     if MI.DC_input_check(values) == True:
+        #         if MI.RF_input_check(values) == True:
+                    
+        elif event == '_STARTP_':
+            print('-------- START Power Sweep --------')
+             # toggle_inputs(window, enabled=0)            # might be needed to avoid errors
+            #try:
+            if MI.DC_input_check(values) == True:
+                if MI.RF_input_check(values) == True:
+                    MI.get_DC_inputs(values)
+                    MI.get_RF_inputs(values)
+                    IK.start_POWER_sweep()
+                else:
+                    print('Cannot start sweep RF is invalid')
+            else:
+                print('Cannot start sweep DC input is invalid')
+            # except Exception as e:
+            #     print(type(e))
+            #     print('Power sweep start error') 
 
     window.close()
