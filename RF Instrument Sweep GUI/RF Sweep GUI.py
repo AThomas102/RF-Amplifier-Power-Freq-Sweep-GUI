@@ -1,9 +1,15 @@
+
 # combine frequency and power sweeps
 #
 # integrate gate voltage and drain quiescent current, create start/stop sequence for gate & drain 
 # 
 # move unneccesary functions out of classes 
 #
+# instr connect class can be removed and simplified
+#
+# add vrange and current protection on sweeps
+#
+# add checkbox for OCP
 #
 #
 #
@@ -53,7 +59,7 @@ def get_title():
             file_string = 'export data'
         return file_string  
 
-def gate_button_update(gate_control, window):
+def gate_button_update(gate_control):
     if gate_control: 
         active = 'ON'
         window['_GATEP_'].update('Gate ON', button_color='green')
@@ -64,16 +70,109 @@ def gate_button_update(gate_control, window):
         window['_GATEF_'].update('Gate OFF', button_color='red')
     return active
 
+def flatten_data(export_data, sweep_type):
+    try:
+        flat_data = {}
+        flat_data['rf IN power (dBm)'] = export_data['rf_in'][sweep_type]  # adds data for rf vector supply
+        for instr in export_data:             # adds data for dc supplies
+            if 'DC' in instr:
+                for ch in export_data[instr]:
+                    flat_data[str(instr) + ', Channel ' + str(ch) + ' Voltage (V)'] = []
+                    flat_data[str(instr) + ', Channel ' + str(ch) + ' Current (A)'] = []
+                    for measurement in export_data[instr][ch]:
+                        current = strip_measurement(measurement[0])
+                        voltage = strip_measurement(measurement[1])
+                        flat_data[str(instr) + ', Channel ' + str(ch) + ' Voltage (V)'].append(voltage)
+                        flat_data[str(instr) + ', Channel ' + str(ch) + ' Current (A)'].append(current)
+        #print(flat_data.keys())
+        flat_data = pad_dict_list(flat_data, '-')
+        return flat_data
+    except Exception as e:
+        print(type(e))
+        return 'nul'
+
+def read_dc_values(chs, dc_supplies, data_out): # gets the data for all dc devices 
+    for supply in dc_supplies:
+        for ch in range(chs[supply]):
+            try:
+                current = dc_supplies[supply].query('I' + str(ch+1) + 'O?')    # this command is for the CPX400DP power supply
+            except Exception as e:
+                print(type(e))
+                current = '-'
+            try:
+                voltage = dc_supplies[supply].query('V' + str(ch+1) + 'O?')
+            except Exception as e:
+                print(type(e))
+                voltage = '-'
+            try:
+                current_values = voltage, current
+                data_out[supply][ch+1].append(current_values)     
+            except Exception as e:
+                print(type(e))
+                current_values = '-','-'
+                data_out[supply][ch+1].append(current_values)
+            print('supply' + str(supply) + ', channel: ' + str(ch+1) + \
+                ' V = ', str(voltage),', I = ', str(current))
+                
+    return data_out
+
+def tgl_drain_chs(chs, dc_supplies, enabled=1): # toggle on supply drain channels
+    try:
+        for supply in dc_supplies:
+            if supply != 'DC1':
+                for ch in range(chs[supply]):
+                    dc_supplies[supply].write('OP' + str(ch) + ' ' + str(enabled))
+        return True 
+    except:
+        return False 
+
+def strip_measurement(measurement):
+    translation_table = dict.fromkeys(map(ord, 'VA'), None)     # add units/characters to remove 
+    out = measurement[0].strip().translate(translation_table)
+    return out
+
+def tgl_gate_chs(chs, dc_supplies, enabled=1): # toggle on supply gate channels 
+    try:
+        for ch in range(chs[dc_supplies['DC1']]):
+            dc_supplies[dc_supplies].write('OP' + str(ch) + ' ' + str(enabled))
+            on = dc_supplies[dc_supplies].write('OP' + str(ch)) 
+            volt = dc_supplies[dc_supplies].write('V' + str(ch) + 'O?') 
+            volt = int(strip_measurement(volt))
+            on = int(strip_measurement(on))
+            if on == 1 and volt >= 4:
+                out = True
+            return False
+        return out
+        
+    except:
+        print('-gate supply toggle error-')
+        return False
+    
+def export_to_csv(flat_data):
+    try:
+        df = pd.DataFrame(flat_data, columns=flat_data.keys())
+        dt_string = get_title()
+        if folder == []:
+            output_folder = default_folder
+        else:
+            output_folder = folder
+        df.to_csv(str(output_folder) + '/' + str(dt_string) + '.csv', header=True)
+        print('exported at: ', str(output_folder))
+    except Exception as e:
+        print(type(e))
+        print('-data export to csv unsuccessful-')
+        return False
+    return True
 
 class BuildGui:
 
     def __init__(self, window):
         self.window = window
         self.supply_idx = {'pwr':0,'freq':0}
-        self.rfsupply_col_names = {'pwr':['Freq (GHz):', 'Start (dBm):', 'Stop (dBm):', 'Step (dB):'],'freq':['Start Freq (GHz):', 'Stop Freq (GHz):', 'Step Freq (GHz):', 'Level (dBm):']}
+        self.rfsupply_col_names = {'pwr':['Freq (GHz):', 'Start (dBm):', 'Stop (dBm):', 'Step (dB):', 'Step Time (s)'],'freq':['Start Freq (GHz):', 'Stop Freq (GHz):', 'Step Freq (GHz):', 'Level (dBm):', 'Step Time (s)']}
         self.dcsupply_col_names = ['Voltage (V) 1/2:', 'Current Lim (A) 1/2:',
                                    'Voltage (V) 3/4:', 'Current Lim (A) 3/4:']
-        self.default_rf_inputs = {'pwr':['0.5', '-20', '-10', '1'], 'freq':['0.5', '2', '0.1', '-10']}
+        self.default_rf_inputs = {'pwr':['0.5', '-20', '-10', '1', '2'], 'freq':['0.5', '2', '0.1', '-10', '2']}
 
     # change separator colour
     def sep_colour(self, sepname, sepcolour):
@@ -82,6 +181,9 @@ class BuildGui:
         button_style.theme_use(self.window.TtkTheme)
         button_style.configure(style_name, background = sepcolour)
         self.window[sepname].Widget.configure(style = style_name)
+
+
+            
 
     def power_supply_col_name(self):
         names = [[sg.Text('Channel:', size=(18,1), font='bold 10')] 
@@ -128,7 +230,8 @@ class BuildGui:
         #print(ManageInputs.cur_tab)
 
 class InstrConnect:
-    name = {'DC Power Supply (1)':'DC1','DC Power Supply (2)':'DC2',
+    
+    name = {'DC Power Supply (1) (Gate Supply Only)':'DC1','DC Power Supply (2)':'DC2',
             'DC Power Supply (3)':'DC3','DC Power Supply (4)':'DC4', 'Vector Signal Generator':'RF1'}
     addr = {'DC1':'','DC2':'','DC3':'','DC4':''}
     chs = {'DC1':0,'DC2':0,'DC3':0,'DC4':0}
@@ -182,31 +285,30 @@ class ManageInputs:
         self.chs = InstrConnect.chs
         self.addr = InstrConnect.addr
         
-        
-    def get_DC_inputs(self, values):
+    def get_dc_inputs(self, values):
         for supply in self.chs:
             if self.chs[supply] > 0:    # get channel 1 voltage & current
                 ch1 = [[values['_' + self.cur_tab + '_' + supply + '_0_0_'],
-                 values['_' + self.cur_tab + '_' + supply + '_0_1_']]] 
+                values['_' + self.cur_tab + '_' + supply + '_0_1_']]] 
                 self.DCinputs[supply] = ch1                  
             if self.chs[supply] > 1:        # for 2 channel supplies
                 ch2 = [values['_' + self.cur_tab + '_' + supply + '_1_0_'],
-                 values['_' + self.cur_tab + '_' + supply + '_1_1_']]
+                values['_' + self.cur_tab + '_' + supply + '_1_1_']]
                 self.DCinputs[supply].append(ch2)
             if self.chs[supply] > 2:        # for 3 channel supplies
                 ch3 = [values['_' + self.cur_tab + '_' + supply + '_0_2_'],
-                 values['_' + self.cur_tab + '_' + supply + '_0_3_']]
+                values['_' + self.cur_tab + '_' + supply + '_0_3_']]
                 self.DCinputs[supply].append(ch3)
             if self.chs[supply] > 3:        # for 4 channel supplies
                 ch4 = [values['_' + self.cur_tab + '_' + supply + '_1_2_'],
-                 values['_' + self.cur_tab + '_' + supply + '_1_3_']]
+                values['_' + self.cur_tab + '_' + supply + '_1_3_']]
                 self.DCinputs[supply].append(ch4)
         #print(self.DCinputs)
         return self.DCinputs 
 
-    def DC_input_check(self, values):       # checks all dc current limit and voltage values are in valid range
+    def dc_input_check(self, values):       # checks all dc current limit and voltage values are in valid range
         for supply in self.chs:             # for all supplies
-            print(self.chs[supply])
+            # print(self.chs[supply])
             for i in range(self.chs[supply]):  # for all open channels
                 if i%2 == 0: j = 0
                 else: j = 1
@@ -221,19 +323,19 @@ class ManageInputs:
                     else:
                         print('-Invalid voltage on channel:', str(i+1),
                          ', please use any value from 0-30 V in steps of 0.01-')
-                        return 0
+                        return False
                     if  0 <= current <= 5 and (100*current)%1 == 0:                           
                         print('OK Current on channel:', str(i+1))
                     else:
                         print('-Invalid current on channel:', str(i+1),
                          ', please use any value from 0-5 A in steps of 0.01-')
-                        return 0
+                        return False
                 except Exception as e:
                     print(type(e))
                     print('-please input a value-')
-                    return 0
+                    return False  
         print('DC parameters OK')
-        return 1
+        return True
 
     def table_update(self, window):
         rowselected = []
@@ -299,7 +401,7 @@ class ManageInputs:
                         window['_' + str(tab) + '_' + str(supply)
                                 + '_' + str(j) + '_' + str(i) + '_'].update(disabled=disabled) 
 
-    def get_RF_inputs(self, values):
+    def get_rf_inputs(self, values):
         self.RFinputs = {}
         print(self.cur_tab)
         if str(self.cur_tab) == 'pwr':
@@ -315,7 +417,7 @@ class ManageInputs:
         print(self.RFinputs)
         return self.RFinputs
     
-    def RF_input_check(self, values):
+    def rf_input_check(self, values):
         if self.cur_tab == 'pwr':
             try:
                 freq = float(values['_pwr_RF0_0_'])
@@ -402,110 +504,103 @@ class InstrControl(ManageInputs):
         self.DCinputs = ManageInputs.DCinputs
         self.RFinputs = ManageInputs.RFinputs
 
-    def update_DC_values(self, rm):   # updates both dc current and voltage on the supply
+    def update_drain_values(self):   # updates both dc current and voltage on the supply
         for supply in self.chs:             # for all supplies
-            for i in range(self.chs[supply]):  # for all channels
-                try:
-                    dc_supply = rm.open_resource(self.addr[supply])
-                except Exception as e:
-                    print(type(e))
-                    print('DC supply could not be opened')
-                try:
-                    voltage = float(self.DCinputs[supply][i][0])
-                    dc_supply.write('V' + str(i+1) + ' ' + str(voltage)) # sends voltage setting, most dc supplies accept this command syntax from what I have seen
-                    print('Voltage SET on channel ' + str(i+1))
-                    time.sleep(0.1)
-                except Exception as e: 
-                    print(type(e))
-                    print('-voltage setting not recognized-')
-                    return 1
-                try:
-                    current = float(self.DCinputs[supply][i][1])
-                    dc_supply.write('I' + str(i+1) + ' ' + str(current)) # sends current setting
-                    print('Current SET on channel ' + str(i+1))
-                    time.sleep(0.1)
-                except Exception as e: 
-                    print(type(e))
-                    print('-current setting not recognized-')
-                    return 1
-                print('DC values updated successfully')
+            if 'DC1' != str(supply):        # not gate supply
+                for i in range(self.chs[supply]):  # for all channels
+                    try:
+                        dc_supply = rm.open_resource(self.addr[supply])
+                    except Exception as e:
+                        print(type(e))
+                        print('DC supply could not be opened')
+                    try:
+                        voltage = float(self.DCinputs[supply][i][0])
+                        dc_supply.write('V' + str(i+1) + ' ' + str(voltage)) # sends voltage setting, most dc supplies accept this command syntax
+                        print('Voltage SET on channel ' + str(i+1))
+                        time.sleep(0.1)
+                    except Exception as e: 
+                        print(type(e))
+                        print('-voltage setting not recognized-')
+                        return 1
+                    try:
+                        current = float(self.DCinputs[supply][i][1])
+                        dc_supply.write('I' + str(i+1) + ' ' + str(current))
+                        print('Current lim set on channel ' + str(i+1))
+                        time.sleep(0.1)
+                    except Exception as e: 
+                        print(type(e))
+                        print('-current setting not recognized-')
+                        return 1
+                    print('DC drain values updated')
 
-    def flatten_data(export_data, sweep_type):
+    def update_gate_values(self, rm):
+        supply = 'DC1'  # gate supply
+        for i in range(self.chs[supply]):  # for all channels
+            try:
+                dc_supply = rm.open_resource(self.addr[supply])
+            except Exception as e:
+                print(type(e))
+                print('DC supply could not be opened')
+                return False
+            try:
+                voltage = float(self.DCinputs[supply][i][0])
+                dc_supply.write('V' + str(i+1) + ' ' + str(voltage)) # sends voltage setting, most dc supplies accept this command syntax from what I have seen
+                print('Voltage SET on channel ' + str(i+1))
+                time.sleep(0.1)
+            except Exception as e: 
+                print(type(e))
+                print('-voltage setting not recognized-')
+                return False
+            try:
+                current = float(self.DCinputs[supply][i][1])
+                dc_supply.write('I' + str(i+1) + ' ' + str(current)) # sends current setting
+                print('Current lim set on channel ' + str(i+1))
+                time.sleep(0.1)
+            except Exception as e: 
+                print(type(e))
+                print('-current setting not recognized-')
+                return False
+            print('DC gate values updated')
+            return True
+
+    def con_dc_sup(self):   # generates resource for all dc supplies 
+        dc_supplies = {}
         try:
-            flat_data = {}
-            flat_data['rf IN power (dBm)'] = export_data['rf_in'][sweep_type]  # adds data for rf vector supply
-            for instr in export_data:             # adds data for dc supplies
-                if 'DC' in instr:
-                    for ch in export_data[instr]:
-                        flat_data[str(instr) + ', Channel ' + str(ch) + ' Voltage (V)'] = []
-                        flat_data[str(instr) + ', Channel ' + str(ch) + ' Current (A)'] = []
-                        for measurement in export_data[instr][ch]:
-                            translation_table = dict.fromkeys(map(ord, 'VA'), None)     # add units/characters to remove 
-                            voltage = measurement[0].strip().translate(translation_table)
-                            current = measurement[1].strip().translate(translation_table)
-                            flat_data[str(instr) + ', Channel ' + str(ch) + ' Voltage (V)'].append(voltage)
-                            flat_data[str(instr) + ', Channel ' + str(ch) + ' Current (A)'].append(current)
-            #print(flat_data.keys())
-            flat_data = pad_dict_list(flat_data, '-')
-            return flat_data
-        except Exception as e:
+            for supply in self.addr:  
+                if self.addr[supply] != '':
+                    print('opening instrument ' + str(supply))
+                    dc_supplies[supply] = rm.open_resource(self.addr[supply])
+                    print('connection successful')
+        except Exception as e: 
             print(type(e))
-            return 'nul'
-        
-    def export_to_csv(flat_data):
-        try:
-            df = pd.DataFrame(flat_data, columns=flat_data.keys())
-            dt_string = get_title()
-            if folder == []:
-                output_folder = default_folder
-            else:
-                output_folder = folder
-            df.to_csv(str(output_folder) + '/' + str(dt_string) + '.csv', header=True)
-            print('exported at: ', str(output_folder))
-        except Exception as e:
-            print(type(e))
-            print('-data export to csv unsuccessful-')
+            print('Connection to ' + str(InstrConnect.get_name(supply)) + ' failed')
             return False
-        return True
+        return dc_supplies   
 
     def find_quiescent(self):
-        InstrControl.update_DC_values(rm)
-        InstrControl.update_DC_gates()
-
-    def get_DC_values(chs, dc_supplies, data_out): # gets the data for all dc devices 
-        for supply in dc_supplies:
-            for ch in range(chs[supply]):
-                try:
-                    current = dc_supplies[supply].query('I' + str(ch+1) + 'O?')    # this command is for the CPX400DP power supply
-                except Exception as e:
-                    print(type(e))
-                    current = '-'
-                try:
-                    voltage = dc_supplies[supply].query('V' + str(ch+1) + 'O?')
-                except Exception as e:
-                    print(type(e))
-                    voltage = '-'
-                try:
-                    current_values = voltage, current
-                    data_out[supply][ch+1].append(current_values)     
-                except Exception as e:
-                    print(type(e))
-                    current_values = '-','-'
-                    data_out[supply][ch+1].append(current_values)
-                print('supply' + str(supply) + ', channel: ' + str(ch+1) + \
-                 ' V = ', str(voltage),', I = ', str(current))
+        vg_init = 5
+        InstrControl.update_drain_values(type='G')
+        dc_sup = self.con_dc_sup()
+        val = self.update_gate_values()
+        tgl = tgl_gate_chs(self.chs, dc_sup)
+        if dc_sup & val & tgl:
+            for chs in range() 
+            if tgl_drain_chs(self.chs, dc_sup):
+                for i in range(self.chs['DC1']):
+                    found, k = False, 1
+                    while not(found):
+                        gate_voltage = vg_init-k*0.02
+                        dc_sup['DC1'].write('V' + str(i+1) + ' ' + str(gate_voltage))
+                forcvxc
                     
-        return data_out
 
-    def toggle_channels(chs, dc_supplies, enabled): # toggle on dc channels
-        for supply in dc_supplies:
-            for ch in range(chs[supply]):
-                dc_supplies[supply].write('OP' + str(ch) + ' ' + str(enabled))  
+                        
 
-    def start_POWER_sweep(self):  # starts power sweep when start button is pressed
+
+
+    def power_sweep(self):  # starts power sweep when start button is pressed
         complete = False 
         instr_out_data = {}   # create all channel data lists
-        dc_supplies = {}
         for supply in self.chs:    # for all supplies
             channels = {}
             for ch in range(self.chs[supply]):       # for all channels
@@ -525,17 +620,11 @@ class InstrControl(ManageInputs):
             print(type(e))
             print('Connection to RF supply failed, sweep failed')
             return 1   # exits function if rf supply is not connected
-        try:
-            for supply in self.addr:  # connects to the dc supply if it is not already connected
-                if self.addr[supply] != '':
-                    print('opening instrument ' + str(supply))
-                    dc_supplies[supply] = rm.open_resource(self.addr[supply])
-                    print('connection successful')
-        except Exception as e: 
-            print(type(e))
-            print('Connection to ' + str(InstrConnect.get_name(supply)) + ' failed')
-
-        InstrControl.toggle_channels(self.chs, dc_supplies, enabled=1)
+        dc_supplies = self.con_dc_sup()
+        if dc_supplies == False:
+            print('Connection to DC supplies failed, sweep failed')
+            return 1
+        tgl_drain_chs(self.chs, dc_supplies)
         rf_supply.write('*RST')
         rf_supply.write('*CLS')
         rf_supply.write('SOURce1:FREQuency:CW ' + str(self.rf_inputs['freq']) + ' GHz')
@@ -554,15 +643,15 @@ class InstrControl(ManageInputs):
                 current_rf_power = '-'
             instr_out_data['rf_in']['pwr'].append(current_rf_power) # append current rf power
             print('current rf power = ' + str(current_rf_power))
-            instr_out_data = InstrControl.get_DC_values(self.chs, dc_supplies, instr_out_data)
+            instr_out_data = read_dc_values(self.chs, dc_supplies, instr_out_data)
             rf_supply.write('SOURce1:POWer:MANual UP')
             if current_rf_power >= self.rf_inputs['stop']:       # check whether sweep is complete
                 complete = True
         rf_supply.write('OUTPut:ALL:STATe 0')   # turn off RF
-        InstrControl.toggle_channels(self.chs, dc_supplies, enabled=0)
+        tgl_drain_chs(self.chs, dc_supplies, enabled=0)
         print('RF Power Sweep Complete')
         #print(instr_out_data)
-        flat_data = InstrControl.flatten_data(instr_out_data, 'pwr')
+        flat_data = flatten_data(instr_out_data, 'pwr')
         print(flat_data)
         if flat_data == 'nul':
             print('Export unsuccesful, data manipulation error ')
@@ -570,13 +659,15 @@ class InstrControl(ManageInputs):
         else:  
             print('Data flatten succesful')
         #out_data = pae_calculation(flat_data)
-        if InstrControl.export_to_csv(flat_data) == True:
+        if export_to_csv(flat_data) == True:
             print('Export to CSV successful')
         else:
             print('Export unsuccesful, data manipulation error ')
-        return 0         
+        return 0 
 
-    def start_FREQ_sweep(self):
+         
+
+    def freq_sweep(self):
         complete = False
         instr_out_data = {}   # create all channel data lists
         dc_supplies = {}
@@ -609,7 +700,7 @@ class InstrControl(ManageInputs):
             print(type(e))
             print('Connection to ' + str(InstrConnect.get_name(supply)) + ' failed')
         print(self.rf_inputs)
-        InstrControl.toggle_channels(self.chs, dc_supplies, enabled=1)
+        tgl_drain_chs(self.chs, dc_supplies)
         rf_supply.write('*RST')
         rf_supply.write('*CLS')
         rf_supply.write('SOURce1:SWEep:FREQuency:MODE MANual')
@@ -627,15 +718,15 @@ class InstrControl(ManageInputs):
                 current_rf_freq = '-'
             instr_out_data['rf_in']['freq'].append(current_rf_freq)
             print('current rf freq = ' + str(current_rf_freq))
-            instr_out_data = InstrControl.get_DC_values(self.chs, dc_supplies, instr_out_data)
+            instr_out_data = read_dc_values(self.chs, dc_supplies, instr_out_data)
             rf_supply.write('SOURce1:FREQuency:MANual UP')
             if current_rf_freq >= self.rf_inputs['stop']*(1_000_000_000):       # check whether sweep is complete
                 complete = True
         rf_supply.write('OUTPut:ALL:STATe 0')   # turn off RF
-        InstrControl.toggle_channels(self.chs, dc_supplies, enabled=0)
+        tgl_drain_chs(self.chs, dc_supplies, enabled=0)
         print('RF Frequency Sweep Complete')
         #print(instr_out_data)
-        flat_data = InstrControl.flatten_data(instr_out_data, 'freq')
+        flat_data = flatten_data(instr_out_data, 'freq')
         print(flat_data)
         if flat_data == 'nul':
             print('Export unsuccesful, data manipulation error ')
@@ -643,7 +734,7 @@ class InstrControl(ManageInputs):
         else:  
             print('Data flatten succesful')
         #instr_out_data = pae_calculation(flat)
-        if InstrControl.export_to_csv(flat_data) == True:
+        if export_to_csv(flat_data) == True:
             print('Export to CSV successful')
         else:
             print('Export unsuccesful, export error ')
@@ -656,9 +747,9 @@ class InstrControl(ManageInputs):
                 if self.addr[supply] != '':
                     print('opening instrument ' + str(supply))
                     dc_supplies[supply] = rm.open_resource(self.addr[supply])
-            IK.toggle_channels(dc_supplies, enabled=1)
+            tgl_drain_chs(dc_supplies)
             time.sleep(1)
-            IK.toggle_channels(dc_supplies, enabled=0)
+            tgl_drain_chs(dc_supplies, enabled=0)
         except Exception as e:
             print(type(e))
             return 0
@@ -690,10 +781,10 @@ if __name__ == '__main__':
         [sg.Col(setup_col_1)], [sg.HorizontalSeparator(key='_SEP.1_')],
         [sg.Text('Select instrument from table and assign functionality:',
                  font='bold 12'), sg.Push()],
-        [sg.Text('Instrument ID:', size=(18,1), font='bold 11'),
+        [sg.Text('Instrument ID:', size=(20,1), font='bold 11'),
          sg.Input(size=(28,1), disabled=True, key='_SLCT.INSTR_'),
          sg.Push()],
-        [sg.Text('Instrument functionality:', size=(18,1), font='bold 11'),
+        [sg.Text('Instrument functionality:', size=(20,1), font='bold 11'),
          sg.OptionMenu(values=InstrConnect.name.keys(),
                        key='_INSTR.FUNC_'),
          sg.Push()],
@@ -701,14 +792,22 @@ if __name__ == '__main__':
                    font='bold 11', button_color='Gray58')]]),
          sg.Push()],
         [sg.HorizontalSeparator(key='_SEP.2_')],
-        [sg.Text('Select sweep mode:', font='bold 12'), sg.Push()],
-        [sg.Col([[sg.Radio('Power Sweep', 'Sweep', default=True,
+        [sg.Col([[sg.Text('Sweep mode:', font='bold 12'), sg.Push()],
+        [sg.Radio('Power Sweep', 'Sweep', default=True,
                            enable_events=True, key='_PWR.SWEEP_',
                            font='bold 11')],
         [sg.Radio('Frequency Sweep', 'Sweep', default=False,
-                  enable_events=True, key='_FRQ.SWEEP_', font='bold 11')]]),
-         sg.Push()],
-        [sg.HorizontalSeparator(key='_SEP.2_')],
+                  enable_events=True, key='_FRQ.SWEEP_', font='bold 11')],
+        [sg.Radio('Power & Frequency Sweep', 'Sweep', default=False,
+                  enable_events=True, key='_PRF.SWEEP_', font='bold 11')]], justification='left'),
+         sg.Col([[sg.Text('Sweep options:', font='bold 12')],
+         [sg.Checkbox('Find quiescent current', default=True, k='_FINDQCUR_')]], vertical_alignment='top'),
+         sg.Col([[sg.Text('CH' + str(i+1), s=(1,1), s=(5, 1), p=(2,0),
+                  font='bold 10', justification='l')
+                  for i in range(4)],
+                [sg.InputText('1', size=(6, 1), disabled=True, 
+                  k=('_SETUP_QC' + str(i + 1))) for i in range(4)]], vertical_alignment='top', p=(0,2))],
+        [sg.HorizontalSeparator(key='_SEP.3_')],
         [sg.Text('Select export options:', font='bold 12'), sg.Push()], 
         [sg.Col([[sg.Button('Open Folder'),
              sg.Push(), sg.Text('Save in: ' + str(default_folder), justification='r', key='_FOLDER_')]]),
@@ -731,34 +830,30 @@ if __name__ == '__main__':
         [BG.rf_supply_col_name('freq')],   
         [BG.rf_supply_col_inputs('freq', disabled=False)],
         [sg.HorizontalSeparator()],
-        [sg.Text('Select frequency sweep parameters for DC supply 1: ', 
+        [sg.Text('Select frequency sweep parameters for DC supply 1: (gate only)', 
                    font='bold 12')],
-        [sg.Text('-', k='_freq1_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('freq', disabled=False)],
         [sg.HorizontalSeparator()],
         [sg.Text('Select frequency sweep parameters for DC supply 2: ', 
                    font='bold 12')],
-        [sg.Text('-', k='_freq2_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('freq')],
         [sg.HorizontalSeparator()],
         [sg.Text('Select frequency sweep parameters for DC supply 3: ', 
                    font='bold 12')],
-        [sg.Text('-', k='_freq3_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('freq')],
         [sg.HorizontalSeparator()],
         [sg.Text('Select frequency sweep parameters for DC supply 4: ', 
                    font='bold 12')],
-        [sg.Text('-', k='_freq3_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('freq')],
-        [sg.Button('Ok', pad=(5,10), key='_OKF_'),
-         sg.Button('Update', pad=(5,10), key='_UPDATEF_', visible=False),
+        [sg.Button('Ok', pad=(5,2), key='_OKF_'),
          sg.Push(),
-         sg.Button('Gate OFF', p=(20,20), key='_GATEF_', button_color='red'),
-         sg.Button('START',  p=(20,20), key='_STARTF_')], 
+         sg.Button('Find Quiescent Current', p=(5,2), key ='_FINDQC_P_'),
+         sg.Button('Gate OFF', p=(5,2), key='_GATEF_', button_color='red'),
+         sg.Button('START',  p=(5,2), key='_STARTF_')], 
         ]
 
     pwr_layout = [
@@ -767,34 +862,30 @@ if __name__ == '__main__':
         [BG.rf_supply_col_name('pwr')],
         [BG.rf_supply_col_inputs('pwr', disabled=False)],
         [sg.HorizontalSeparator()],
-        [sg.Text('Select power sweep parameters for DC supply 1: ', 
+        [sg.Text('Select power sweep parameters for DC supply 1: (gate only)', 
                    font='bold 12')],
-        [sg.Text('-', k='_pwr1_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('pwr', disabled=False)],
         [sg.HorizontalSeparator()],
         [sg.Text('Select power sweep parameters for DC supply 2: ', 
                    font='bold 12')],
-        [sg.Text('-', k='_pwr2_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('pwr')],
         [sg.HorizontalSeparator()],
         [sg.Text('Select power sweep parameters for DC supply 3: ', 
                    font='bold 12')],
-        [sg.Text('-', k='_pwr3_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('pwr')],
         [sg.HorizontalSeparator()],
         [sg.Text('Select power sweep parameters for DC supply 4: ', 
                    font='bold 12')],
-        [sg.Text('-', k='_pwr3_')],
         [BG.power_supply_col_name()],
         [BG.power_supply_col_inputs('pwr')],
-        [sg.Button('Ok', pad=(5,10), key='_OKP_'),
-         sg.Button('Update', pad=(5,10), key='_UPDATEP_', visible=False),
+        [sg.Button('Ok', pad=(5,2), key='_OKP_'),
          sg.Push(),
-         sg.Button('Gate OFF', p=(10,10), key='_GATEP_', button_color='red'),
-         sg.Button('START',  p=(10,10), key='_STARTP_')], 
+         sg.Button('Find Quiescent Current', p=(5,2), key ='_FINDQC_F_'),
+         sg.Button('Gate OFF', p=(5,2), key='_GATEP_', button_color='red'),
+         sg.Button('START',  p=(5,2), key='_STARTP_')], 
           # TO DO, color start button green or red depending on whether all inputs are valid
     ]
     logging_layout = [ 
@@ -830,6 +921,8 @@ if __name__ == '__main__':
     IC = InstrConnect(rm)
     BG.sep_colour('_SEP.1_','SlateBlue3')
     BG.sep_colour('_SEP.2_','SlateBlue3')
+    BG.sep_colour('_SEP.3_','SlateBlue3')
+
     gate_control = False
 
     while True: 
@@ -894,11 +987,11 @@ if __name__ == '__main__':
         elif event == '_OKF_' or event == '_OKP_':                                           
             print('-------- OK (power tab) --------')                                                               
             try:
-                if MI.DC_input_check(values) == True:
-                    if MI.RF_input_check(values) == True:
-                        MI.get_DC_inputs(values)
-                        MI.get_RF_inputs(values)
-                        IK.update_DC_values(rm)
+                if MI.dc_input_check(values) == True:
+                    if MI.rf_input_check(values) == True:
+                        MI.get_dc_inputs(values)
+                        MI.get_rf_inputs(values)
+                        IK.update_drain_values()
                     else:
                         print('RF signal generator input is invalid')
                 else:
@@ -907,15 +1000,11 @@ if __name__ == '__main__':
                 print(type(e))
                 print('Instrument connect not completed')
 
-        elif event == '_FINDQUIESCENTP_' or event == '_FINDQUIESCENTF_':
+        elif event == '_FINDQC_P_' or event == '_FINDQC_F_':
             print('-------- Find Quiescent Current --------')
             try:
-                if MI.DC_input_check(values) == True:
-                    if MI.RF_input_check(values) == True:  
-                        IK.find_quiescent()
-
-                    else:
-                        print('Cannot start sweep RF is invalid')
+                if MI.dc_input_check(values) == True:
+                    IK.find_quiescent(rm)
                 else:
                     print('Cannot start sweep DC input is invalid')
             except Exception as e:
@@ -927,21 +1016,19 @@ if __name__ == '__main__':
             gate_control = not(gate_control)
             active = gate_button_update(gate_control, window)
             print('-------- Gate Turned ' + str(active) + ' --------')
-            
-
 
         elif event == '_STARTP_' or event == '_STARTF_':
             print('-------- START Sweep --------')
              # toggle_inputs(window, enabled=0)            # might be needed to avoid errors
             try:
-                if MI.DC_input_check(values) == True:
-                    if MI.RF_input_check(values) == True:
-                        MI.get_DC_inputs(values)
-                        MI.get_RF_inputs(values)
+                if MI.dc_input_check(values) == True:
+                    if MI.rf_input_check(values) == True:
+                        MI.get_dc_inputs(values)
+                        MI.get_rf_inputs(values)
                         if event == '_STARTP_':
-                            IK.start_POWER_sweep()
+                            IK.power_sweep()
                         elif event == '_STARTF_':
-                            IK.start_FREQ_sweep()
+                            IK.freq_sweep()
                     else:
                         print('Cannot start sweep RF is invalid')
                 else:
