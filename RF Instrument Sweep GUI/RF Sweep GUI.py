@@ -13,7 +13,6 @@
 #
 #
 # used imports:
-from sched import Event
 import PySimpleGUI as sg
 import pandas as pd
 import pyvisa as visa
@@ -83,7 +82,14 @@ def flatten_data(export_data):
         except:
             pass
         try:
-            flat_data['rf IN freq (dBm)'] = export_data['rf_in']['freq']  # adds data for rf vector supply
+            flat_data['rf IN freq (GHz)'] = export_data['rf_in']['freq']  # adds data for rf vector supply
+        except:
+            pass
+        try:
+            flat_data['rf OUT power (dBm)'] = []
+            for measurement in export_data['rf_out']['pwr']:
+                pwr = strip_measurement(measurement)
+                flat_data['rf OUT power (dBm)'].append(pwr)
         except:
             pass
         for instr in export_data:             # adds data for dc supplies
@@ -96,8 +102,10 @@ def flatten_data(export_data):
                     for measurement in export_data[instr][ch]:
                         current = strip_measurement(measurement[0])
                         voltage = strip_measurement(measurement[1])
-                        flat_data[str(instr) + ' ' + type + ', Channel ' + str(ch) + ' Voltage (V)'].append(voltage)
-                        flat_data[str(instr) + ' ' + type + ', Channel ' + str(ch) + ' Current (A)'].append(current)
+                        flat_data[str(instr) + ' ' + type + ', Channel ' 
+                        + str(ch) + ' Voltage (V)'].append(voltage)
+                        flat_data[str(instr) + ' ' + type + ', Channel ' 
+                        + str(ch) + ' Current (A)'].append(current)
         #print(flat_data.keys())
         flat_data = pad_dict_list(flat_data, '-')
         return flat_data
@@ -167,7 +175,7 @@ class BuildGui:
     def __init__(self, window):
         self.window = window
         self.supply_idx = {'pwr':0,'freq':0, 'pwrfreq':0}
-        self.rfsupply_col_names = {'pwr':['Freq (GHz):', 'Start (dBm):', 'Stop (dBm):', 'Step (dB):', 'Step Time (s)'],'freq':['Start Freq (GHz):', 'Stop Freq (GHz):', 'Step Freq (GHz):', 'Level (dBm):', 'Step Time (s)'], 'pwrfreq':['Start Freq (GHz):', 'Stop Freq (GHz):', 'Step Freq (GHz):', 'Start Power (dBm):', 'Stop Power (dBm):', 'Step Power (dBm):', 'Step Time (s)']}
+        self.rfsupply_col_names = {'pwr':['Freq (GHz):', 'Start (dBm):', 'Stop (dBm):', 'Step (dB):', 'Step Time (s)'],'freq':['Level (dBm):', 'Start Freq (GHz):', 'Stop Freq (GHz):', 'Step Freq (GHz):', 'Step Time (s)'], 'pwrfreq':['Start Freq (GHz):', 'Stop Freq (GHz):', 'Step Freq (GHz):', 'Start Power (dBm):', 'Stop Power (dBm):', 'Step Power (dBm):', 'Step Time (s)']}
         self.dcsupply_col_names = ['Volts(V) 1/2:', 'Cur Lim(A) 1/2:',
                                    'Volts(V) 3/4:', 'Cur Lim(A) 3/4:']
         self.default_rf_inputs = {'pwr':['0.5', '-20', '-10', '1', '2'], 'freq':['0.5', '2', '0.1', '-10', '2'], 'pwrfreq':['0.5', '2', '0.1', '-20', '-10', '1', '1']}
@@ -308,44 +316,44 @@ class ManageInputs:
         #print(self.dcinputs)
         return self.dcinputs 
 
-    def dc_input_check(self, values):       # checks all dc current limit and voltage values are in valid range
-        for supply in self.chs:             # for all supplies
-            # print(self.chs[supply])
-            for ch in range(self.chs[supply]):  # for all open channels
-                j = ch%2 
+    def dc_input_check(self):       # checks all dc current limit and voltage values are in valid range
+        for supply in self.dcinputs:             # for all supplies
+            # print(self.dcinputs[supply])
+            for ch in self.dcinputs[supply]:  # for all open channels
                 try:
-                    voltage = float(values['_' + str(self.cur_tab) + '_'
-                     + str(supply) + '_' + str(j) + '_' + str(ch-j) + '_'])
-                    current = float(values['_' + str(self.cur_tab) + '_'
-                     + str(supply) + '_' + str(j) + '_' + str(ch-j+1) + '_'])
-
+                    voltage = float(self.dcinputs[supply][ch][0])
+                    current = float(self.dcinputs[supply][ch][1])
                     if  0 <= voltage <= 30 and (100*voltage)%1 == 0:                           
-                        print('OK Voltage on channel:', str(ch+1))
+                        print('OK Voltage on ', ch)
                     else:
-                        print('-Invalid voltage on channel:', str(ch+1),
-                         ', please use any value from 0-30 V in steps of 0.01-')
+                        print('-Invalid voltage on ', ch, 
+                            ', please use any value from 0-30 V in steps of 0.01-')
                         return False
                     if  0 <= current <= 5 and (100*current)%1 == 0:                           
                         print('OK Current on channel:', str(ch+1))
                     else:
-                        print('-Invalid current on channel:', str(ch+1),
-                         ', please use any value from 0-5 A in steps of 0.01-')
+                        print('-Invalid current on ', ch, 
+                            ', please use any value from 0-5 A in steps of 0.01-')
                         return False
                 except Exception as e:
                     print(type(e))
-                    print('-please input a valid number value on channel: ', str(ch+1), '-')
+                    print('-please input a valid number value on ', ch)
                     return False 
+                finally:
+                    print('OK dc drain/gate parameters')
         for ch in range(self.chs['DC1']): 
             try:
                 current = float('_SETUP_QC' + str(ch+1))
                 if 0 < current <= 3:
-                    print('quiescent current limit OK on channel: ', str(ch+1))
+                    print('quiescent current limit OK on ', ch)
                 else:
-                    print('quiescent current out of range on channel: ', str(ch+1))
+                    print('quiescent current out of range on ', ch)
                     return False
             except:
-                    print('-please input a valid quiescent current value on channel: ', str(ch+1), '-')
-        print('DC parameters OK')
+                    print('-please input a valid quiescent current value on ', ch)
+                    return False
+            finally:
+                print('OK dc drain quiescent current parameters')
         return True
 
     def table_update(self, window):
@@ -422,27 +430,37 @@ class ManageInputs:
 
     def get_rf_inputs(self, values):
         self.rfinputs = {}
-        print(self.cur_tab)
+        #print(self.cur_tab)
         if str(self.cur_tab) == 'pwr':
             self.rfinputs['freq'] = float(values['_pwr_RF0_0_'])
-            self.rfinputs['start'] = float(values['_pwr_RF0_1_'])
-            self.rfinputs['stop'] = float(values['_pwr_RF0_2_'])
-            self.rfinputs['step'] = float(values['_pwr_RF0_3_'])
+            self.rfinputs['pstart'] = float(values['_pwr_RF0_1_'])
+            self.rfinputs['pstop'] = float(values['_pwr_RF0_2_'])
+            self.rfinputs['pstep'] = float(values['_pwr_RF0_3_'])
+            self.rfinputs['tstep'] = float(values['_freq_RF0_2_'])
         if  str(self.cur_tab) == 'freq':
-            self.rfinputs['start'] = float(values['_freq_RF0_0_'])
-            self.rfinputs['stop'] = float(values['_freq_RF0_1_'])
-            self.rfinputs['step'] = float(values['_freq_RF0_2_'])
             self.rfinputs['level'] = float(values['_freq_RF0_3_'])
-        print(self.rfinputs)
+            self.rfinputs['fstart'] = float(values['_freq_RF0_0_'])
+            self.rfinputs['ftop'] = float(values['_freq_RF0_1_'])
+            self.rfinputs['fstep'] = float(values['_freq_RF0_2_'])
+            self.rfinputs['tstep'] = float(values['_freq_RF0_2_'])
+        if str(self.cur_tab) == 'pwrfreq':
+            self.rfinputs['fstart'] = float(values['_freq_RF0_0_'])
+            self.rfinputs['fstop'] = float(values['_freq_RF0_1_'])
+            self.rfinputs['fstep'] = float(values['_freq_RF0_2_'])
+            self.rfinputs['pstart'] = float(values['_freq_RF0_3_'])
+            self.rfinputs['pstop'] = float(values['_freq_RF0_4_'])
+            self.rfinputs['pstep'] = float(values['_freq_RF0_5_'])
+            self.rfinputs['tstep'] = float(values['_freq_RF0_6_'])    
+        #print(self.rfinputs)
         return self.rfinputs
     
-    def rf_input_check(self, values):
-        if self.cur_tab == 'pwr':
+    def rf_input_check(self):
+        if self.cur_tab == 'pwr' and self.cur_tab == 'pwrfreq':
             try:
-                freq = float(values['_pwr_RF0_0_'])
-                pwr_start = float(values['_pwr_RF0_1_'])
-                pwr_stop = float(values['_pwr_RF0_2_'])
-                pwr_step = float(values['_pwr_RF0_3_'])
+                freq = float(self.rfinputs['freq'])
+                pwr_start = float(self.rfinputs['pstart'])
+                pwr_stop = float(self.rfinputs['pstop'])
+                pwr_step = float(self.rfinputs['pstep'])
                 if  0.1 <= freq <= 30 and (100*freq)%1 == 0:                           
                     print('OK Frequency')
                 else:
@@ -474,13 +492,12 @@ class ManageInputs:
                 print(type(e))
                 print('-unable to recognise power sweep RF parameters please check-')
                 return 0
-        elif self.cur_tab == 'freq':
+        if self.cur_tab == 'freq' and self.cur_tab == 'pwrfreq':
             try:
-                freq_start = float(values['_freq_RF0_0_'])
-                freq_stop = float(values['_freq_RF0_1_'])
-                freq_step = float(values['_freq_RF0_2_'])
-                pwr_level = float(values['_freq_RF0_3_'])
-
+                pwr_level = float(self.rfinputs['level'])
+                freq_start = float(self.rfinputs['fstart'])
+                freq_stop = float(self.rfinputs['fstop'])
+                freq_step = float(self.rfinputs['fstep'])
                 if  0.1 <= freq_start <= 30 and (100*freq_start)%1 == 0:                           
                     print('OK Start Frequency')
                 else:
@@ -491,9 +508,6 @@ class ManageInputs:
                 else:
                     print('Invalid stop freq, please use any value from 0.1-30 GHz in steps of 0.01')
                     return 0
-                print(freq_start)
-                print(freq_stop)
-                print(freq_start < freq_step)
                 if freq_start < freq_stop:
                     print('OK Stop and Start Frequency')
                 else:
@@ -508,11 +522,19 @@ class ManageInputs:
                     print('OK power level')
                 else:
                     print('Invalid power level, please use any value from -80 - 30 dBm in steps of 0.01')
-                print('RF frequency sweep parameters OK')
-                return 1
+                    return 0
             except Exception as e:
                 print(type(e))
                 print('-unable to recognise frequency sweep RF parameters please check-')
+                return 0
+        time_step = float(self.rfinputs['tstep'])
+        if 0.01 <= time_step <= 20 and (100*time_step)%1 == 0:
+            print('OK ', self.cur_tab, 'sweep time step')
+        else:
+            print('Invalid time step, please use any value from 0.01 - 20 s in steps of 0.01')
+            return 0
+        print('RF frequency sweep parameters OK')
+        return 1
 
 class InstrControl(ManageInputs):
 
@@ -593,7 +615,6 @@ class InstrControl(ManageInputs):
                 if self.addr[supply] != '':
                     print('opening instrument ' + str(supply))
                     dc_supplies[supply] = rm.open_resource(self.addr[supply])
-                    print('connection successful')
         except Exception as e: 
             print(type(e))
             print('Connection to ' + str(InstrConnect.get_name(supply)) + ' failed')
@@ -647,17 +668,20 @@ class InstrControl(ManageInputs):
                 pass
             else:
                 print('unable to update gate dc supply 1')
+                return False
             if self.tgl_gate_chs(self.chs, dc_sups):
                 pass
             else:
                 print('unable to turn on gate dc supply 1')
+                return False
 
             if self.tgl_drain_chs(self.chs, dc_sups):
-                for ch in range(self.chs['DC1']):
+                for i in range(self.chs['DC1']):
                     cur_lim = values['_SETUP_QC' + str(i+1)]
                     found, k = False, 1
                     while not(found):
                         gate_voltage = self.vg_init-k*0.02
+                        k=k+1
                         dc_sups['DC1'].write('V' + str(i+1) + ' ' + str(gate_voltage))
                         time.sleep(0.2)
                         currentdc2 = read_drain_currents(self.chs, dc_sups, 'DC2')
@@ -668,17 +692,20 @@ class InstrControl(ManageInputs):
                         dc4_cur = sum(currentdc4)
                         total_current = dc2_cur + dc3_cur + dc4_cur # assuming all other drains are 0A I dont have to decide which drain matches which gate
                         if total_current >= cur_lim:
-                            j = ch%2
-                            if ch>1: i = 2
+                            j = i%2
+                            if i>1: i = 2
                             else: i = 0
                             window['_freq_DC1_' + str(j) + '_' + str(i) + '_'].update(gate_voltage)          
                             window['_pwr_DC1_' + str(j) + '_' + str(i) + '_'].update(gate_voltage)
                             found = True
-                    dc_sups['DC1'].write('V' + str(i+1) + ' ' + str(self.vg_init))  
+                        
+                    dc_sups['DC1'].write('V' + str(i+1) + ' ' + str(self.vg_init))
+                else:
+                    print('unable to turn on dc drain supplies')
         except Exception as e:
             print(type(e))
             print('-find quiescent current unsuccesful')
-            return
+            return False
         return True
                     
     def power_sweep(self):  # starts power sweep when start button is pressed
@@ -715,16 +742,18 @@ class InstrControl(ManageInputs):
             return 1    
         rf_supply.write('*RST')
         rf_supply.write('*CLS')
+        rf_supply.write('TRIGger1:FSWeep:SOURce SINGle')
         rf_supply.write('SOURce1:FREQuency:CW ' + str(self.rfinputs['freq']) + ' GHz')
         rf_supply.write('SOURce1:SWEep:POWer:MODE MANual')
-        rf_supply.write('SOURce1:POWer:STARt ' + str(self.rfinputs['start']) + ' dBm')
-        rf_supply.write('SOURce1:POWer:STOP ' + str(self.rfinputs['stop']) + ' dBm')
+        rf_supply.write('SOURce1:POWer:STARt ' + str(self.rfinputs['pstart']) + ' dBm')
+        rf_supply.write('SOURce1:POWer:STOP ' + str(self.rfinputs['pstop']) + ' dBm')
         rf_supply.write('SOURce1:POWer:MODE SWEep')
         rf_supply.write('Output1:STATe 1')
-        rf_supply.write('SOURce1:SWEep:POWer:STEP ' + str(self.rfinputs['step']))
+        rf_supply.write('SOURce1:SWEep:POWer:STEP ' + str(self.rfinputs['pstep']))
+        rf_supply.write('SOURce1:SWEep:FREQuency:EXECute')
         while complete == False:
             # I need to check for some kind of interupt here during the sweep
-            time.sleep(0.2)
+            float(time.sleep(self.rfinputs['tstep']))
             try:
                 current_rf_power = float(rf_supply.query('SOURce1:POWer:POWer?')) 
             except Exception as e:
@@ -781,7 +810,6 @@ class InstrControl(ManageInputs):
                 if self.addr[supply] != '':
                     print('opening instrument ' + str(supply))
                     dc_supplies[supply] = rm.open_resource(self.addr[supply])
-                    print('connection successful')
         except Exception as e: 
             print(type(e))
             print('Connection to ' + str(InstrConnect.get_name(supply)) + ' failed')
@@ -794,15 +822,17 @@ class InstrControl(ManageInputs):
             return 1
         rf_supply.write('*RST')
         rf_supply.write('*CLS')
+        rf_supply.write('TRIGger1:FSWeep:SOURce SINGle')
+        rf_supply.write('SOURce1:POWer:POWer ' + str(self.rfinputs['level']))
         rf_supply.write('SOURce1:SWEep:FREQuency:MODE MANual')
-        rf_supply.write('SOURce1:FREQuency:STARt ' + str(self.rfinputs['start']) + ' GHz')
-        rf_supply.write('SOURce1:FREQuency:STOP ' + str(self.rfinputs['stop']) + ' GHz')
+        rf_supply.write('SOURce1:FREQuency:STARt ' + str(self.rfinputs['fstart']) + ' GHz')
+        rf_supply.write('SOURce1:FREQuency:STOP ' + str(self.rfinputs['fstop']) + ' GHz')
         rf_supply.write('SOURce1:FREQuency:MODE SWEep')
         rf_supply.write('Output1:STATe 1')
-        rf_supply.write('SOURce1:SWEep:FREQuency:STEP:LINear ' + str(self.rfinputs['step']) + ' GHz')
-
+        rf_supply.write('SOURce1:SWEep:FREQuency:STEP:LINear ' + str(self.rfinputs['fstep']) + ' GHz')
+        rf_supply.write('SOURce1:SWEep:FREQuency:EXECute')
         while complete == False:
-            time.sleep(0.2)
+            float(time.sleep(self.rfinputs['tstep']))
             try:
                 current_rf_freq = float(rf_supply.query('SOURce1:FREQ:FREQ?'))
             except Exception as e:
@@ -859,39 +889,53 @@ class InstrControl(ManageInputs):
                 if self.addr[supply] != '':
                     print('opening instrument ' + str(supply))
                     dc_supplies[supply] = rm.open_resource(self.addr[supply])
-                    print('connection successful')
         except Exception as e: 
             print(type(e))
             print('Connection to ' + str(InstrConnect.get_name(supply)) + ' failed')
-        print(self.rfinputs)
+        #print(self.rfinputs)
         if InstrControl.tgl_gate_chs(self.chs, dc_supplies) == False:
             print('gate turn on failed, sweep failed')
             return 1
         if InstrControl.tgl_drain_chs(self.chs, dc_supplies) == False:
             print('drain turn on failed, sweep failed')
             return 1
+        # this needs proper testing
         rf_supply.write('*RST')
         rf_supply.write('*CLS')
-        rf_supply.write('SOURce1:SWEep:FREQuency:MODE MANual')
-        rf_supply.write('SOURce1:FREQuency:STARt ' + str(self.rfinputs['start']) + ' GHz')
-        rf_supply.write('SOURce1:FREQuency:STOP ' + str(self.rfinputs['stop']) + ' GHz')
-        rf_supply.write('SOURce1:FREQuency:MODE SWEep')
+        rf_supply.write('TRIGger1:FSWeep:SOURce SINGle')
+        rf_supply.write('SOURce1:SWEep:COMBined:MODE MANUAL')
+        rf_supply.write('SOURce1:COMBined:FREQuency:STARt ' + str(self.rfinputs['fstart']) + ' GHz')
+        rf_supply.write('SOURce1:COMBined:FREQuency:STOP ' + str(self.rfinputs['fstop']) + ' GHz')
+        rf_supply.write('SOURce1:COMBined:POWer:STARt ' + str(self.rfinputs['pstart']) + ' dBm')
+        rf_supply.write('SOURce1:COMBined:POWer:STOP ' + str(self.rfinputs['pstop']) + ' dBm')
+        rf_supply.write('SOURce1:FREQuency:MODE COMB')
         rf_supply.write('Output1:STATe 1')
-        rf_supply.write('SOURce1:SWEep:FREQuency:STEP:LINear ' + str(self.rfinputs['step']) + ' GHz')
-
+        rf_supply.write('SOURce1:SWEep:FREQuency:STEP:LINear ' + str(self.rfinputs['fstep']) + ' GHz')
+        rf_supply.write('SOURce1:SWEep:POWer:STEP ' + str(self.rfinputs['pstep']))
+        rf_supply.write('SOURce1:SWEep:COMBined:EXECute')
         while complete == False:
-            time.sleep(0.2)
+            float(time.sleep(self.rfinputs['tstep']))
             try:
                 current_rf_freq = float(rf_supply.query('SOURce1:FREQ:FREQ?'))
+                current_rf_power = float(rf_supply.query('SOURce1:POWer:POWer?')) 
             except Exception as e:
                 current_rf_freq = '-'
+                current_rf_power = '-' 
             instr_out_data['rf_in']['freq'].append(current_rf_freq)
-            print('current rf freq = ' + str(current_rf_freq))
+            instr_out_data['rf_in']['pwr'].append(current_rf_power)
+            print('current rf freq/pwr = ', strip_measurement(current_rf_freq),
+                     '/', strip_measurement(current_rf_power))
             instr_out_data = read_dc_supplies(self.chs, dc_supplies, instr_out_data)
             rf_supply.write('SOURce1:FREQuency:MANual UP')
-            if current_rf_freq >= self.rfinputs['stop']*(1_000_000_000):       # check whether sweep is complete
-                complete = True
-        rf_supply.write('OUTPut:ALL:STATe 0')   # turn off RF
+            if current_rf_freq >= self.rfinputs['stop']*(1_000_000_000):
+                if current_rf_power >= self.rfinputs['stop']:
+                    complete = True
+                else:
+                    rf_supply.write('SOURce1:POWer:MANual UP')
+                    rf_supply.write('SOURce1:FREQuency:MANual' 
+                                + str(self.rfinputs['fstart'] + ' GHz'))
+                    time.sleep(1)
+        rf_supply.write('OUTPut:ALL:STATe 0')
         InstrControl.tgl_drain_chs(self.chs, dc_supplies, enabled=0)
         print('RF Frequency Sweep Complete')
         #print(instr_out_data)
@@ -1186,10 +1230,10 @@ if __name__ == '__main__':
         elif event == '_OKF_' or event == '_OKP_':                                           
             print('-------- OK (power tab) --------')                                                               
             try:
-                if MI.dc_input_check(values) == True:
-                    if MI.rf_input_check(values) == True:
-                        MI.get_dc_inputs(values)
-                        MI.get_rf_inputs(values)
+                MI.get_dc_inputs(values)
+                MI.get_rf_inputs(values)
+                if MI.dc_input_check() == True:
+                    if MI.rf_input_check() == True:
                         IK.update_drain_values()
                     else:
                         print('RF signal generator input is invalid')
@@ -1202,7 +1246,7 @@ if __name__ == '__main__':
         elif event == '_FINDQC_P_' or event == '_FINDQC_F_':
             print('-------- Find Quiescent Current --------')
             try:
-                if MI.dc_input_check(values) == True:
+                if MI.dc_input_check() == True:
                     if IK.find_quiescent() == True:
                         print('quiescent currents found and updated in DC1 table')
                 else:
@@ -1221,10 +1265,10 @@ if __name__ == '__main__':
             print('-------- START Sweep --------')
              # toggle_inputs(window, enabled=0)            # might be needed to avoid errors
             try:
-                if MI.dc_input_check(values) == True:
-                    if MI.rf_input_check(values) == True:
-                        MI.get_dc_inputs(values)
-                        MI.get_rf_inputs(values)
+                MI.get_dc_inputs(values)
+                MI.get_rf_inputs(values)
+                if MI.dc_input_check() == True:
+                    if MI.rf_input_check() == True:
                         IK.update_drain_values()
                         if event == '_STARTP_':
                             IK.power_sweep()
