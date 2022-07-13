@@ -33,6 +33,12 @@ import os
 import time
 import datetime
 
+# constants:
+NAMES = {'DC Power Supply (1) (Gate Supply)':'DC1','DC Power Supply (2)':'DC2', 'DC Power Supply (3)':'DC3','DC Power Supply (4)':'DC4', 'Vector Signal Generator':'RF1', 'Diode Power Sensor':'RF2', 'Signal & Spectrum Analyzer':'RF3'}
+RF_SUPPLY_TYPES = ['Vector Signal Generator', 'Diode Power Sensor', 'Signal & Spectrum Analyzer']
+STOP_EVENTS = '_STOP_', '_STOPLOG_'
+
+
 # pad the flattened data columns for csv export
 def pad_dict_list(dict_list, padel):
         lmax = 0
@@ -505,7 +511,7 @@ class ManageInputs:
         for i in range(dcchs['DC1']):
             window['_SETUP_QC' + str(i+1)].update(disabled=False)
 
-    # 
+    # store user rf inputs in dic
     def get_rf_inputs(self):
         self.rfinputs = {}
         try:
@@ -1081,12 +1087,6 @@ class InstrControl:
 
 if __name__ == '__main__':
 
-    # DEFAULT_FOLDER = 'C:/Users/AndrewThomas/OneDrive - ' + \
-    #     'CSA Catapult/Documents/Equipment VISA Integration/RF sweep data'
-    NAMES = {'DC Power Supply (1) (Gate Supply)':'DC1','DC Power Supply (2)':'DC2',
-            'DC Power Supply (3)':'DC3','DC Power Supply (4)':'DC4', 'Vector Signal Generator':'RF1', 'Diode Power Sensor':'RF2', 'Signal & Spectrum Analyzer':'RF3'}
-    RF_SUPPLY_TYPES = ['Vector Signal Generator', 'Diode Power Sensor', 'Signal & Spectrum Analyzer']
-    STOP_EVENTS = '_STOP_', '_STOPLOG_'
     validfolder = False
     sweep_mode = 'pwr'
     dcaddr = {'DC1':'','DC2':'','DC3':'','DC4':''}
@@ -1161,7 +1161,7 @@ if __name__ == '__main__':
         [sg.Col([
             [sg.Button('Open Folder'),
             sg.Push(), 
-            sg.Text('Save in: ' + str(DEFAULT_FOLDER), justification='r', key='_FOLDER_')]]),
+            sg.Text('Save in: ', justification='r', key='_FOLDER_')]]),
          sg.Push()],
         [sg.Text('Include in file title:'), sg.Push()],
         [sg.Col([[
