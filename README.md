@@ -4,7 +4,7 @@ An instrument GUI designed for automatic RF amplifier testing, by safe turn on o
 through RF power/freq.
 
 Power Added Efficiency of amplifier is calculated using dc & rf measurements. All readings and inputs are exported to a csv. A general instrument check and 
-assignment functions means furthur device test procedures could be developed using this framework on differant tabs.
+assignment functions means furthur device test procedures could be developed using this framework on seperate GUI tabs.
 
 Currently only tested for SMW200A Signal Generator, but can be easily used for alternative generators by changing the serial visa commands to compatible 
 ones. These can be found in the respective instrument manual.
