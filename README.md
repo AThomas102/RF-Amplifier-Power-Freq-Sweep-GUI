@@ -1,4 +1,4 @@
-# CSA-GUI-
+# RF Amplifier Power/Freq Sweep GUI
 For RF &amp; General CSA Catapult engineering testbed work. Connecting instruments using pyvisa with Keysight VISA instrument communication protocol.
 An instrument GUI designed for automatic RF amplifier testing, by safe turn on of device at 5v then stepping down voltage to find quiescent current then stepping
 through RF power/freq.
